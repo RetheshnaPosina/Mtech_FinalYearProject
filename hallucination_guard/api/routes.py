@@ -78,6 +78,8 @@ def _to_response(result) -> VerifyResponse:
             suspicion_flag=c.suspicion_flag.value if hasattr(c.suspicion_flag, "value") else str(c.suspicion_flag),
             correction_suggestion=c.correction_suggestion,
             evidence_snippets=c.evidence_snippets,
+            nli_entailment=round(c.nli_entailment, 4),
+            nli_contradiction=round(c.nli_contradiction, 4),
             debate_rounds=c.debate_rounds,
             api_judge_used=c.api_judge_used,
         )
@@ -140,7 +142,7 @@ async def verify_image(req: ImageVerifyRequest, request: Request) -> VerifyRespo
     safe_path = _validate_image_path(req.image_path)
     rid = str(uuid.uuid4())[:8]
     try:
-        result = await execute(image_path=safe_path, caption=req.caption)
+        result = await execute(image_path=safe_path, caption=req.caption, use_api_judge=req.use_api_judge)
         log_result(result, request_id=rid)
         return _to_response(result)
     except HTTPException:
@@ -155,6 +157,7 @@ async def verify_image_upload(
     request: Request,
     file: UploadFile = File(...),
     caption: str = Form(default=""),
+    use_api_judge: bool = Form(default=False),
 ) -> VerifyResponse:
     _check_rate_limit(request.client.host)
     ext = Path(file.filename or "").suffix.lower()
@@ -166,7 +169,7 @@ async def verify_image_upload(
         with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
             shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
-        result = await execute(image_path=tmp_path, caption=caption or None)
+        result = await execute(image_path=tmp_path, caption=caption or None, use_api_judge=use_api_judge)
         log_result(result, request_id=rid)
         return _to_response(result)
     except HTTPException:
@@ -188,6 +191,7 @@ async def verify_full_upload(
     file: UploadFile = File(...),
     text: str = Form(default=""),
     caption: str = Form(default=""),
+    use_api_judge: bool = Form(default=False),
 ) -> VerifyResponse:
     _check_rate_limit(request.client.host)
     ext = Path(file.filename or "").suffix.lower()
@@ -203,6 +207,7 @@ async def verify_full_upload(
             text=text or None,
             image_path=tmp_path,
             caption=caption or None,
+            use_api_judge=use_api_judge,
         )
         log_result(result, request_id=rid)
         return _to_response(result)

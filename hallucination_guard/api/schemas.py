@@ -14,6 +14,7 @@ class TextVerifyRequest(BaseModel):
 class ImageVerifyRequest(BaseModel):
     image_path: str
     caption: Optional[str] = None
+    use_api_judge: bool = False
 
 
 class FullVerifyRequest(BaseModel):
@@ -37,6 +38,8 @@ class ClaimResultOut(BaseModel):
     suspicion_flag: str
     correction_suggestion: str
     evidence_snippets: List[str]
+    nli_entailment: float = 0.0
+    nli_contradiction: float = 0.0
     debate_rounds: int
     api_judge_used: bool
 

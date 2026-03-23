@@ -105,7 +105,7 @@ async def execute(
         forensics_task = asyncio.create_task(_forensics.run_with_image(safe_path, caption))
 
         try:
-            forensics_result = await forensics_task
+            forensics_msg, forensics_result = await asyncio.wait_for(forensics_task, timeout=120.0)
             result.api_calls_made += forensics_result.get("api_calls_made", 0)
             result.cnn_probability = forensics_result.get("cnn_probability", 0.0)
             result.ela_energy = forensics_result.get("ela_energy", 0.0)
@@ -113,7 +113,7 @@ async def execute(
             result.image_fusion_score = forensics_result.get("fusion_score", 0.0)
             result.has_periodic_artifacts = forensics_result.get("has_periodic_artifacts", False)
             result.image_description = forensics_result.get("caption", "")
-            result.image_verdict = forensics_result.get("verdict", {}).get("value", "")
+            result.image_verdict = forensics_msg.verdict.value if hasattr(forensics_msg, "verdict") else ""
             result.ocr_text = forensics_result.get("ocr_text", "")
             result.objects_detected = forensics_result.get("objects_detected", [])
             result.extracted_claims = forensics_result.get("extracted_claims", [])
@@ -128,16 +128,14 @@ async def execute(
             result.watermark_type = forensics_result.get("watermark_type", "")
             visual_facts = forensics_result
 
-            adv_caught = sum(1 for c in claims if c.api_judge_used)
-            forensics_msg = forensics_result.get("caption", "")
-
         except Exception as e:
             logger.error("Forensics failed: %s", e)
 
-        # --- Tier 3: Cross-modal consistency (CMCD) ---
-        if tier >= 3 and visual_facts and text:
+        # --- Tier 3: OCR claim verification + Cross-modal consistency (CMCD) ---
+        if tier >= 3 and visual_facts:
             try:
-                ocr_claims_text = result.ocr_text
+                # Always fact-check OCR-extracted claims from the image,
+                # even when no text was provided by the caller.
                 ocr_passage = ". ".join(result.extracted_claims)
                 if ocr_passage:
                     ocr_verified = await verify_text(ocr_passage, use_api_judge=use_api_judge)
@@ -145,19 +143,33 @@ async def execute(
                         if c not in result.claims:
                             result.claims.append(c)
 
-                effective_caption = caption or result.image_description
-                cmcd = await run_cmcd(text, safe_path, effective_caption, visual_facts)
-                result.clip_similarity = cmcd.get("clip_similarity", 0.0)
-                result.contradictions_found = cmcd.get("contradiction_count", 0) > 0
-                result.contradiction_severity = cmcd.get("avg_severity", 0.0)
-                result.cross_modal_trust = cmcd.get("cross_modal_trust", 1.0)
-                result.matched_elements = cmcd.get("matched_elements", [])
+                # CMCD: run when either text or caption is provided.
+                # caption alone (e.g. "World War 2" on a suitcase photo) is enough
+                # to detect out-of-context misuse.
+                # run_cmcd is synchronous — must run in executor to avoid blocking the loop.
+                cmcd_text = text or caption
+                if cmcd_text:
+                    effective_caption = caption or result.image_description
+                    loop = asyncio.get_event_loop()
+                    cmcd_result = await loop.run_in_executor(
+                        None, run_cmcd, safe_path, cmcd_text, effective_caption
+                    )
+                    cmcd = cmcd_result.to_dict()
+                    result.clip_similarity = cmcd.get("clip_similarity", 0.0)
+                    result.contradictions_found = cmcd.get("contradiction_count", 0) > 0
+                    result.contradiction_severity = cmcd.get("avg_severity", 0.0)
+                    result.cross_modal_trust = cmcd.get("cross_modal_trust", 1.0)
+                    result.matched_elements = cmcd.get("matched_elements", [])
 
             except Exception as e:
-                logger.error("CMCD failed: %s", e)
+                logger.error("Tier-3 OCR/CMCD failed: %s", e)
 
     # Compute overall trust across modalities
     result.compute_overall()
+
+    # Set policy for image-only results (text path sets it via decide_policy above)
+    if not text and image_path:
+        result.policy = decide_policy(result.overall_trust)
 
     # Collect any remaining suspicion flags
     flags: list[str] = []

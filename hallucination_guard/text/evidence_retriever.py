@@ -124,7 +124,7 @@ async def _wikipedia_search_async(query: str, max_results: int = 5) -> List[Evid
             f"&format=json&srlimit={max_results}"
         )
 
-        async with httpx.AsyncClient(headers=_HEADERS, timeout=10.0) as client:
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=5.0) as client:
             resp1 = await client.get(search_url)
             resp1.raise_for_status()
             data = resp1.json()
@@ -133,11 +133,11 @@ async def _wikipedia_search_async(query: str, max_results: int = 5) -> List[Evid
             if not titles:
                 return []
 
-            titles_param = urllib.parse.quote("|".join(titles[:3]))
+            titles_param = urllib.parse.quote("|".join(titles[:2]))
             extract_url = (
                 f"https://en.wikipedia.org/w/api.php"
                 f"?action=query&prop=extracts&exintro&titles={titles_param}"
-                f"&format=json&exsentences=4&exlimit=3"
+                f"&format=json&exsentences=3&exlimit=2"
             )
             resp2 = await client.get(extract_url)
             resp2.raise_for_status()
@@ -181,21 +181,21 @@ def _wikipedia_search(query: str, max_results: int = 5) -> List[EvidenceItem]:
         )
 
         req = urllib.request.Request(search_url, headers=_HEADERS)
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode())
 
         titles = [item["title"] for item in data.get("query", {}).get("search", [])]
         if not titles:
             return []
 
-        titles_param = urllib.parse.quote("|".join(titles[:3]))
+        titles_param = urllib.parse.quote("|".join(titles[:2]))
         extract_url = (
             f"https://en.wikipedia.org/w/api.php"
             f"?action=query&prop=extracts&exintro&titles={titles_param}"
-            f"&format=json&exsentences=4&exlimit=3"
+            f"&format=json&exsentences=3&exlimit=2"
         )
         req2 = urllib.request.Request(extract_url, headers=_HEADERS)
-        with urllib.request.urlopen(req2, timeout=10) as resp2:
+        with urllib.request.urlopen(req2, timeout=5) as resp2:
             edata = json.loads(resp2.read().decode())
 
         items: List[EvidenceItem] = []
@@ -252,7 +252,7 @@ def _google_search(query: str, max_results: int = 5) -> List[EvidenceItem]:
         return []
 
 
-async def retrieve_evidence(query: str, top_k: int = 5) -> List[EvidenceItem]:
+async def retrieve_evidence(query: str, top_k: int = 3) -> List[EvidenceItem]:
     """Retrieve evidence from Google -> Wikipedia -> mock store, with TTL cache.
 
     Fix #7: uses httpx async connection pool for Wikipedia to avoid spawning

@@ -21,7 +21,8 @@
       --radius: 10px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+    html, body { height: 100%; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; min-height: 100vh; overflow-y: auto; }
 
     /* Header */
     header {
@@ -31,13 +32,16 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
     }
     header h1 { font-size: 1.1rem; font-weight: 700; color: var(--accent2); letter-spacing: 0.3px; }
     header span { font-size: 0.75rem; color: var(--muted); }
     #health-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#555; margin-right:6px; vertical-align:middle; }
 
     /* Tabs */
-    .tabs { display: flex; gap: 4px; padding: 16px 28px 0; border-bottom: 1px solid var(--border); }
+    .tabs { display: flex; gap: 4px; padding: 16px 28px 0; border-bottom: 1px solid var(--border); position: sticky; top: 53px; z-index: 99; background: var(--bg); }
     .tab-btn {
       padding: 8px 20px; border: none; background: transparent; color: var(--muted);
       font-size: 0.88rem; cursor: pointer; border-bottom: 2px solid transparent;
@@ -377,75 +381,237 @@ function pct(v) { return (v * 100).toFixed(1) + '%'; }
 
 function renderClaims(claims) {
   if (!claims || claims.length === 0) return '<p style="color:var(--muted);font-size:0.85rem">No claims extracted.</p>';
-  return claims.map(c => `
+  return claims.map((c, idx) => {
+    const pConf  = ((c.prosecutor_confidence ?? 0) * 100).toFixed(1);
+    const dConf  = ((c.defender_confidence  ?? 0) * 100).toFixed(1);
+    const advScore   = ((c.adversarial_score  ?? 0) * 100).toFixed(1);
+    const nliEnt     = ((c.nli_entailment    ?? 0) * 100).toFixed(1);
+    const nliCon     = ((c.nli_contradiction ?? 0) * 100).toFixed(1);
+    const difficulty = ((c.difficulty_score  ?? 0) * 100).toFixed(1);
+    const vcLabel = c.verdict === 'SUPPORTED' ? 'green' : c.verdict === 'REFUTED' ? 'red' : 'yellow';
+    const gapNum = Math.abs((c.prosecutor_confidence ?? 0) - (c.defender_confidence ?? 0));
+    const gap    = (gapNum * 100).toFixed(1);
+    const gapColor = gapNum > 0.15 ? 'var(--red)' : gapNum > 0.05 ? 'var(--yellow)' : 'var(--green)';
+    return `
     <div class="claim-item">
-      <div class="claim-text">${escHtml(c.claim)}</div>
-      <div class="claim-row">
-        <span class="tag ${c.verdict === 'SUPPORTED' ? 'green' : c.verdict === 'REFUTED' ? 'red' : 'yellow'}">${c.verdict}</span>
-        <span class="tag">Trust ${pct(c.calibrated_trust)}</span>
-        <span class="tag">Difficulty ${pct(c.difficulty_score)}</span>
-        <span class="tag">Rounds ${c.debate_rounds}</span>
-        ${c.api_judge_used ? '<span class="tag" style="border-color:var(--blue);color:var(--blue)">API Judge</span>' : ''}
+      <!-- Claim header -->
+      <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
+        <div style="font-size:0.75rem;color:var(--muted);min-width:22px;margin-top:2px">C${idx+1}</div>
+        <div class="claim-text" style="font-weight:600;font-size:0.94rem;flex:1">"${escHtml(c.claim)}"</div>
       </div>
-      ${c.suspicion_flag && c.suspicion_flag !== 'NONE' ? `<span class="suspicion ${c.suspicion_flag}">${c.suspicion_flag.replace(/_/g,' ')}</span>` : ''}
-      ${c.judge_reasoning ? `<div style="font-size:0.78rem;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">${escHtml(c.judge_reasoning)}</div>` : ''}
-      ${c.correction_suggestion ? `<div style="font-size:0.78rem;color:var(--yellow);margin-top:6px">&#x26A0; ${escHtml(c.correction_suggestion)}</div>` : ''}
+
+      <!-- Verdict + policy tags -->
+      <div class="claim-row" style="margin-bottom:10px">
+        <span class="tag ${vcLabel}" style="font-weight:700;font-size:0.82rem">${c.verdict}</span>
+        <span class="tag" style="border-color:var(--accent2);color:var(--accent2)">Calibrated Trust: <strong>${pct(c.calibrated_trust)}</strong></span>
+        <span class="tag">Raw Trust: ${pct(c.raw_trust)}</span>
+        <span class="tag">Difficulty: ${difficulty}%</span>
+        <span class="tag">Rounds: ${c.debate_rounds}</span>
+        ${c.api_judge_used ? '<span class="tag" style="border-color:var(--blue);color:var(--blue)">&#x2605; API Judge</span>' : '<span class="tag" style="border-color:var(--muted)">Local Judge</span>'}
+      </div>
+
+      <!-- Full score grid -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:12px">
+        <div class="metric-box" title="Prosecutor tries to REFUTE the claim">
+          <div class="val" style="font-size:1.1rem;color:var(--red)">${pConf}%</div>
+          <div class="lbl">&#x2694; Prosecutor</div>
+        </div>
+        <div class="metric-box" title="Defender tries to SUPPORT the claim">
+          <div class="val" style="font-size:1.1rem;color:var(--green)">${dConf}%</div>
+          <div class="lbl">&#x1F6E1; Defender</div>
+        </div>
+        <div class="metric-box" title="Confidence gap — gap > 15% triggers Round 2 debate + API Judge">
+          <div class="val" style="font-size:1.1rem;color:${gapColor}">${gap}%</div>
+          <div class="lbl">&#x21C5; Agent Gap</div>
+        </div>
+        <div class="metric-box" title="AWP adversarial perturbation score — how easily an adversary could flip this verdict">
+          <div class="val" style="font-size:1.1rem;color:var(--yellow)">${advScore}%</div>
+          <div class="lbl">&#x26A1; AWP Adv.</div>
+        </div>
+        <div class="metric-box" title="NLI average entailment across top evidence">
+          <div class="val" style="font-size:1.1rem;color:var(--green)">${nliEnt}%</div>
+          <div class="lbl">&#x2713; NLI Entail</div>
+        </div>
+        <div class="metric-box" title="NLI contradiction signal across top evidence">
+          <div class="val" style="font-size:1.1rem;color:var(--red)">${nliCon}%</div>
+          <div class="lbl">&#x2717; NLI Contra</div>
+        </div>
+      </div>
+
+      <!-- Trust bar -->
+      <div class="trust-bar-wrap" style="margin-bottom:10px">
+        <label><span style="color:var(--accent2)">VCADE Calibrated Trust</span><span>${pct(c.calibrated_trust)}</span></label>
+        <div class="trust-bar" style="height:10px"><div class="trust-bar-fill" style="width:${pct(c.calibrated_trust)};background:${barColor(c.calibrated_trust)}"></div></div>
+      </div>
+
+      ${c.suspicion_flag && c.suspicion_flag !== 'NONE' ? `<div style="margin-bottom:8px"><span class="suspicion ${c.suspicion_flag}">&#x26D4; ${c.suspicion_flag.replace(/_/g,' ')}</span></div>` : ''}
+
+      ${c.judge_reasoning ? `
+        <div style="margin-bottom:8px;padding:10px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+          <div style="font-size:0.73rem;color:var(--accent2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">&#x2696; Judge Reasoning</div>
+          <div style="font-size:0.84rem;color:var(--text);line-height:1.5">${escHtml(c.judge_reasoning)}</div>
+        </div>` : ''}
+
+      ${c.best_alt_hypothesis ? `
+        <div style="margin-bottom:6px;font-size:0.82rem;color:var(--muted);padding:7px 10px;background:var(--bg);border-radius:5px;border-left:3px solid var(--accent2)">
+          <span style="color:var(--accent2)">&#x1F50D; Best Alt. Hypothesis:</span> ${escHtml(c.best_alt_hypothesis)}
+        </div>` : ''}
+
+      ${c.correction_suggestion ? `
+        <div style="margin-bottom:6px;font-size:0.82rem;color:var(--yellow);padding:7px 10px;background:#78350f22;border-radius:5px;border-left:3px solid var(--yellow)">
+          &#x26A0; <strong>Correction:</strong> ${escHtml(c.correction_suggestion)}
+        </div>` : ''}
+
       ${c.evidence_snippets && c.evidence_snippets.length ? `
-        <details style="margin-top:8px">
-          <summary style="font-size:0.78rem;color:var(--muted);cursor:pointer">Evidence snippets (${c.evidence_snippets.length})</summary>
-          <ul class="evidence-list">${c.evidence_snippets.map(e => `<li>${escHtml(e)}</li>`).join('')}</ul>
-        </details>` : ''}
-    </div>`).join('');
+        <div style="margin-top:8px">
+          <div style="font-size:0.75rem;color:var(--accent2);margin-bottom:6px">&#x1F4DA; Evidence Used (${c.evidence_snippets.length} sources)</div>
+          <ul class="evidence-list">${c.evidence_snippets.map((e,i) => `<li><span style="color:var(--accent2);font-size:0.75rem">[${i+1}]</span> ${escHtml(e.slice(0,300))}${e.length>300?'…':''}</li>`).join('')}</ul>
+        </div>` : ''}
+    </div>`;
+  }).join('');
 }
 
 function renderOverall(d) {
   const trust = d.overall_trust ?? 0;
   const policy = d.policy ?? 'FLAG';
+  const vcClass = policy === 'PUBLISH' ? 'SUPPORTED' : policy === 'REJECT' ? 'REFUTED' : 'NOT_ENOUGH_INFO';
+  const policyIcon = policy === 'PUBLISH' ? '&#x2705;' : policy === 'REJECT' ? '&#x274C;' : '&#x26A0;';
+  const latSec = ((d.latency_ms ?? 0) / 1000).toFixed(2);
   return `
-    <div class="verdict-banner ${policy === 'PUBLISH' ? 'SUPPORTED' : policy === 'REJECT' ? 'REFUTED' : 'NOT_ENOUGH_INFO'}">
+    <div class="verdict-banner ${vcClass}" style="flex-wrap:wrap;gap:12px">
       <div>
-        <div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">Overall Trust</div>
-        <div class="verdict-label ${policy === 'PUBLISH' ? 'SUPPORTED' : policy === 'REJECT' ? 'REFUTED' : 'NOT_ENOUGH_INFO'}">${pct(trust)}</div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">AMADA Overall Trust Score</div>
+        <div class="verdict-label ${vcClass}" style="font-size:2rem">${pct(trust)}</div>
       </div>
-      <div style="text-align:right">
-        <span class="policy-badge ${policy}">${policy}</span>
-        <div style="font-size:0.75rem;color:var(--muted);margin-top:6px">Tier ${d.tier_used ?? '?'} · ${(d.latency_ms ?? 0).toFixed(0)}ms</div>
+      <div style="text-align:right;flex:1;min-width:160px">
+        <div style="font-size:1.1rem;font-weight:700">${policyIcon} <span class="policy-badge ${policy}" style="font-size:0.9rem;padding:5px 14px">${policy}</span></div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:8px">Tier ${d.tier_used ?? '?'} &nbsp;·&nbsp; ${(d.latency_ms ?? 0).toFixed(0)}ms (${latSec}s) &nbsp;·&nbsp; ${d.api_calls_made ?? 0} API call(s)</div>
       </div>
     </div>
-    <div class="trust-bar-wrap">
+
+    <div class="trust-bar-wrap" style="margin-top:14px">
       <label><span>Calibrated Trust</span><span>${pct(trust)}</span></label>
-      <div class="trust-bar"><div class="trust-bar-fill" style="width:${pct(trust)};background:${barColor(trust)}"></div></div>
-    </div>`;
+      <div class="trust-bar" style="height:12px"><div class="trust-bar-fill" style="width:${pct(trust)};background:${barColor(trust)}"></div></div>
+    </div>
+
+    ${(d.fact_score || d.awp_fact_score || d.adversarial_detection_rate) ? `
+    <div class="metrics-grid" style="margin-top:14px">
+      <div class="metric-box">
+        <div class="val" style="font-size:1.2rem">${pct(d.fact_score ?? 0)}</div>
+        <div class="lbl">Fact Score</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="font-size:1.2rem">${pct(d.awp_fact_score ?? 0)}</div>
+        <div class="lbl">AWP Fact Score</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="font-size:1.2rem">${pct(d.adversarial_detection_rate ?? 0)}</div>
+        <div class="lbl">Adversarial Detection</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="font-size:1.2rem">${(d.claims||[]).length}</div>
+        <div class="lbl">Claims Analysed</div>
+      </div>
+    </div>` : ''}`;
 }
 
 function renderImageStats(d) {
-  if (!d.image_fusion_score && d.image_fusion_score !== 0) return '';
-  const items = [
-    ['Image Fusion', pct(d.image_fusion_score)],
-    ['CNN Prob', pct(d.cnn_probability)],
-    ['ELA Energy', pct(d.ela_energy)],
-    ['FFT Score', pct(d.fft_score)],
-    ['CLIP Sim', pct(d.clip_similarity)],
-    ['Cross-Modal Trust', pct(d.cross_modal_trust)],
-  ].filter(x => x[1] !== '0.0%');
-  if (!items.length) return '';
+  const hasImageData = d.image_path || d.image_fusion_score > 0 || d.image_verdict || d.image_description || d.detailed_caption || (d.objects_detected && d.objects_detected.length);
+  if (!hasImageData) return '';
+
+  const forensicsItems = [
+    ['&#x1F9EA; Image Fusion Score', pct(d.image_fusion_score), 'Composite authenticity score from ELA+FFT+CNN'],
+    ['&#x1F916; CNN Deepfake Prob', pct(d.cnn_probability), 'Neural network deepfake probability'],
+    ['&#x26A1; ELA Energy', pct(d.ela_energy), 'Error Level Analysis — compression anomalies'],
+    ['&#x1F4CA; FFT Score', pct(d.fft_score), 'Frequency domain artifact score'],
+    ['&#x1F517; CLIP Similarity', pct(d.clip_similarity), 'Image-text semantic alignment'],
+    ['&#x1F91D; Cross-Modal Trust', pct(d.cross_modal_trust), 'Text vs image consistency'],
+    ['&#x1F4AF; Context Trust', pct(d.context_trust), 'Out-of-context detection score'],
+    ['&#x1F47B; Deepfake Probability', pct(d.deepfake_probability), 'Face manipulation detection'],
+  ];
+
   return `
     <div class="card">
-      <h3>Image Forensics</h3>
+      <h3>&#x1F50D; Image Forensics Pipeline</h3>
+
+      ${d.image_verdict ? `
+        <div style="margin-bottom:14px;padding:10px 14px;background:var(--bg);border-radius:7px;border-left:3px solid var(--accent)">
+          <span style="font-size:0.75rem;color:var(--muted)">Image Verdict: </span>
+          <strong style="color:var(--text)">${escHtml(d.image_verdict)}</strong>
+        </div>` : ''}
+
       <div class="metrics-grid">
-        ${items.map(([l,v]) => `<div class="metric-box"><div class="val">${v}</div><div class="lbl">${l}</div></div>`).join('')}
+        ${forensicsItems.map(([l,v,tip]) => `
+          <div class="metric-box" title="${tip}">
+            <div class="val" style="font-size:1.1rem">${v}</div>
+            <div class="lbl">${l}</div>
+          </div>`).join('')}
       </div>
-      ${d.image_verdict ? `<div style="margin-top:12px;font-size:0.85rem;color:var(--muted)">Verdict: <strong style="color:var(--text)">${d.image_verdict}</strong></div>` : ''}
-      ${d.image_description ? `<div style="margin-top:8px;font-size:0.82rem;color:var(--muted)">${escHtml(d.image_description)}</div>` : ''}
-      ${d.watermark_present ? `<div style="margin-top:6px;font-size:0.8rem;color:var(--yellow)">&#x26A0; Watermark detected: ${d.watermark_type || 'unknown'}</div>` : ''}
-      ${d.has_periodic_artifacts ? '<div style="font-size:0.8rem;color:var(--red);margin-top:4px">&#x26A0; Periodic artifacts detected (possible AI generation)</div>' : ''}
-      ${d.contradictions_found ? `<div style="font-size:0.8rem;color:var(--red);margin-top:4px">&#x26A0; Text-image contradiction detected (severity: ${pct(d.contradiction_severity)})</div>` : ''}
+
+      ${d.has_periodic_artifacts ? '<div style="margin-top:10px;font-size:0.82rem;color:var(--red);padding:6px 10px;background:#7f1d1d22;border-radius:5px">&#x26A0; Periodic artifacts detected — possible AI/GAN generation</div>' : ''}
+      ${d.watermark_type ? `<div style="margin-top:6px;font-size:0.82rem;color:var(--yellow);padding:6px 10px;background:#78350f22;border-radius:5px">&#x26A0; Watermark detected: <strong>${escHtml(d.watermark_type)}</strong></div>` : ''}
+      ${d.contradictions_found ? `<div style="margin-top:6px;font-size:0.82rem;color:var(--red);padding:6px 10px;background:#7f1d1d22;border-radius:5px">&#x274C; Text-image contradiction detected — severity: <strong>${pct(d.contradiction_severity)}</strong></div>` : ''}
+      ${d.faces_found ? `<div style="margin-top:6px;font-size:0.82rem;color:var(--blue);padding:6px 10px;background:#1e3a5f22;border-radius:5px">&#x1F464; Face(s) detected — deepfake probability: <strong>${pct(d.deepfake_probability)}</strong></div>` : ''}
+
+      ${d.detailed_caption || d.image_description ? `
+        <div style="margin-top:14px;padding:10px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+          <div style="font-size:0.73rem;color:var(--accent2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">&#x1F4DD; AI Image Description</div>
+          <div style="font-size:0.85rem;color:var(--text)">${escHtml(d.detailed_caption || d.image_description)}</div>
+        </div>` : ''}
+
+      ${d.objects_detected && d.objects_detected.length ? `
+        <div style="margin-top:10px">
+          <div style="font-size:0.75rem;color:var(--muted);margin-bottom:6px">&#x1F3AF; Objects Detected (${d.objects_detected.length})</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">${d.objects_detected.map(o => `<span class="tag">${escHtml(o)}</span>`).join('')}</div>
+        </div>` : ''}
+
+      ${d.ocr_text ? `
+        <div style="margin-top:10px;padding:8px 10px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+          <div style="font-size:0.73rem;color:var(--muted);margin-bottom:4px">&#x1F4C4; OCR Text Extracted</div>
+          <div style="font-size:0.82rem;color:var(--text);font-family:monospace">${escHtml(d.ocr_text)}</div>
+        </div>` : ''}
+
+      ${d.mismatched_entities && d.mismatched_entities.length ? `
+        <div style="margin-top:10px">
+          <div style="font-size:0.75rem;color:var(--red);margin-bottom:6px">&#x274C; Mismatched Entities</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">${d.mismatched_entities.map(e => `<span class="tag red">${escHtml(e)}</span>`).join('')}</div>
+        </div>` : ''}
     </div>`;
 }
 
 function renderFlags(flags) {
   if (!flags || flags.length === 0) return '';
-  return `<div class="card"><h3>Suspicion Flags</h3>${flags.map(f => `<div style="font-size:0.82rem;color:var(--red);margin-bottom:4px">&#x26D4; ${escHtml(f)}</div>`).join('')}</div>`;
+  return `
+    <div class="card" style="border-color:var(--red)">
+      <h3 style="color:var(--red)">&#x26D4; Suspicion Flags (${flags.length})</h3>
+      ${flags.map(f => `
+        <div style="font-size:0.84rem;color:var(--red);margin-bottom:6px;padding:6px 10px;background:#7f1d1d22;border-radius:5px">
+          &#x26D4; ${escHtml(f)}
+        </div>`).join('')}
+    </div>`;
+}
+
+function renderPipelineSummary(d) {
+  const steps = [];
+  steps.push({icon:'&#x1F6E1;', label:'Sentinel Validation', status:'ok', detail:`Tier ${d.tier_used} assigned`});
+  if (d.claims && d.claims.length) steps.push({icon:'&#x2696;', label:'AMADA Debate (AWP)', status:'ok', detail:`${d.claims.length} claim(s) · ${d.claims[0]?.debate_rounds ?? 1} round(s)`});
+  if (d.image_fusion_score > 0 || d.image_verdict) steps.push({icon:'&#x1F50D;', label:'Forensics Pipeline (ELA+FFT+CNN)', status:'ok', detail:`Fusion: ${pct(d.image_fusion_score)}`});
+  if (d.clip_similarity > 0) steps.push({icon:'&#x1F91D;', label:'CMCD Cross-Modal', status:'ok', detail:`CLIP: ${pct(d.clip_similarity)}`});
+  if (d.api_calls_made > 0) steps.push({icon:'&#x2605;', label:'API Judge (Claude/Gemini)', status:'ok', detail:`${d.api_calls_made} call(s)`});
+
+  return `
+    <div class="card" style="margin-bottom:18px">
+      <h3>&#x1F9EC; AMADA Pipeline Execution</h3>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+        ${steps.map((s,i) => `
+          <div style="display:flex;align-items:center;gap:10px;font-size:0.84rem">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:0.7rem;flex-shrink:0">&#x2713;</div>
+            <span>${s.icon} <strong>${s.label}</strong></span>
+            <span style="color:var(--muted);font-size:0.78rem;margin-left:auto">${s.detail}</span>
+          </div>
+          ${i < steps.length-1 ? '<div style="width:2px;height:10px;background:var(--border);margin-left:10px"></div>' : ''}`).join('')}
+      </div>
+    </div>`;
 }
 
 function renderError(msg) {
@@ -472,8 +638,8 @@ async function verifyText() {
     });
     const d = await res.json();
     if (!res.ok) throw new Error(d.detail || res.statusText);
-    out.innerHTML = renderOverall(d) + renderFlags(d.active_suspicion_flags) +
-      `<div class="card"><h3>Claims (${(d.claims||[]).length})</h3>${renderClaims(d.claims)}</div>`;
+    out.innerHTML = renderOverall(d) + renderPipelineSummary(d) + renderFlags(d.active_suspicion_flags) +
+      `<div class="card"><h3>&#x2696; Claims Analysis (${(d.claims||[]).length})</h3>${renderClaims(d.claims)}</div>`;
     out.style.display = 'block';
   } catch(e) {
     out.innerHTML = renderError(e.message); out.style.display = 'block';
@@ -507,8 +673,8 @@ async function verifyImage() {
     }
     const d = await res.json();
     if (!res.ok) throw new Error(d.detail || res.statusText);
-    out.innerHTML = renderOverall(d) + renderImageStats(d) + renderFlags(d.active_suspicion_flags) +
-      (d.claims && d.claims.length ? `<div class="card"><h3>Extracted Claims</h3>${renderClaims(d.claims)}</div>` : '');
+    out.innerHTML = renderOverall(d) + renderPipelineSummary(d) + renderImageStats(d) + renderFlags(d.active_suspicion_flags) +
+      (d.claims && d.claims.length ? `<div class="card"><h3>&#x2696; Extracted Claims</h3>${renderClaims(d.claims)}</div>` : '');
     out.style.display = 'block';
   } catch(e) {
     out.innerHTML = renderError(e.message); out.style.display = 'block';
@@ -543,8 +709,8 @@ async function verifyFull() {
     }
     const d = await res.json();
     if (!res.ok) throw new Error(d.detail || res.statusText);
-    out.innerHTML = renderOverall(d) + renderImageStats(d) + renderFlags(d.active_suspicion_flags) +
-      (d.claims && d.claims.length ? `<div class="card"><h3>Claims (${d.claims.length})</h3>${renderClaims(d.claims)}</div>` : '');
+    out.innerHTML = renderOverall(d) + renderPipelineSummary(d) + renderImageStats(d) + renderFlags(d.active_suspicion_flags) +
+      (d.claims && d.claims.length ? `<div class="card"><h3>&#x2696; Claims Analysis (${d.claims.length})</h3>${renderClaims(d.claims)}</div>` : '');
     out.style.display = 'block';
   } catch(e) {
     out.innerHTML = renderError(e.message); out.style.display = 'block';

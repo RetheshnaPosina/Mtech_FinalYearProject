@@ -117,54 +117,39 @@ def extract_all(image_path: str) -> FlorenceResult:
         image = Image.open(image_path).convert("RGB")
         model, processor = _load_florence()
 
-        # OCR with region bounding boxes
-        ocr_data = _run_task(model, processor, image, "<OCR_WITH_REGION>", max_tokens=1024)
-        regions = ocr_data.get("<OCR_WITH_REGION>", {})
-        labels = regions.get("labels", [])
-        bboxes = regions.get("quad_boxes", [])
-        result.ocr_regions = [
-            {"text": t.strip(), "bbox": b}
-            for t, b in zip(labels, bboxes)
-            if t.strip()
-        ]
-
-        # Plain OCR text
-        ocr_plain_data = _run_task(model, processor, image, "<OCR>", max_tokens=512)
-        ocr_plain = ocr_plain_data.get("<OCR>", "")
-        result.ocr_text = _clean_ocr(" ".join(
-            t.strip() for t in [ocr_plain] + [r["text"] for r in result.ocr_regions]
-            if t.strip()
-        ))
+        # Plain OCR text (fast path — skip region bounding boxes for speed)
+        try:
+            ocr_plain_data = _run_task(model, processor, image, "<OCR>", max_tokens=256)
+            ocr_plain = ocr_plain_data.get("<OCR>", "")
+            result.ocr_text = _clean_ocr(ocr_plain.strip())
+            result.ocr_regions = []
+        except Exception:
+            result.ocr_text = ""
+            result.ocr_regions = []
 
         # Object detection
         try:
-            od_data = _run_task(model, processor, image, "<OD>", max_tokens=256)
+            od_data = _run_task(model, processor, image, "<OD>", max_tokens=128)
             od = od_data.get("<OD>", {})
             result.objects_detected = list(set(od.get("labels", [])))
         except Exception:
             result.objects_detected = []
 
-        # Dense region captions
-        try:
-            drc_data = _run_task(model, processor, image, "<DENSE_REGION_CAPTION>", max_tokens=512)
-            drc = drc_data.get("<DENSE_REGION_CAPTION>", {})
-            result.dense_captions = [c.strip() for c in drc.get("labels", []) if c.strip()]
-        except Exception:
-            result.dense_captions = []
-
         # Scene caption
         try:
-            cap_data = _run_task(model, processor, image, "<CAPTION>", max_tokens=128)
+            cap_data = _run_task(model, processor, image, "<CAPTION>", max_tokens=64)
             result.scene_caption = cap_data.get("<CAPTION>", "").strip()
         except Exception:
             result.scene_caption = ""
 
         # Detailed caption
         try:
-            dcap_data = _run_task(model, processor, image, "<DETAILED_CAPTION>", max_tokens=256)
+            dcap_data = _run_task(model, processor, image, "<DETAILED_CAPTION>", max_tokens=128)
             result.detailed_caption = dcap_data.get("<DETAILED_CAPTION>", "").strip()
         except Exception:
             result.detailed_caption = ""
+
+        result.dense_captions = []  # Skip DENSE_REGION_CAPTION for speed
 
         # Extract numeric values from OCR text
         result.numeric_values = _NUM_RE.findall(result.ocr_text)

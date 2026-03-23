@@ -143,17 +143,45 @@ class TrustScore:
     modal_weight: float = 0.2
 
     def compute_overall(self) -> None:
-        if not self.claims:
+        has_text = bool(self.claims)
+        has_image = bool(self.image_path and self.image_fusion_score > 0)
+
+        if not has_text and not has_image:
             return
-        text_trust = sum(c.calibrated_trust for c in self.claims) / len(self.claims)
-        if self.image_path:
+
+        if has_text and has_image:
+            text_trust = sum(c.calibrated_trust for c in self.claims) / len(self.claims)
             self.overall_trust = (
                 self.text_weight * text_trust
                 + self.image_weight * self.image_fusion_score
                 + self.modal_weight * self.cross_modal_trust
             )
+        elif has_text:
+            self.overall_trust = sum(c.calibrated_trust for c in self.claims) / len(self.claims)
         else:
-            self.overall_trust = text_trust
+            # Image-only path.
+            authenticity = 1.0 - self.image_fusion_score  # fusion_score = deepfake likelihood
+            forensics_trust = (
+                0.5 * authenticity
+                + 0.3 * self.context_trust
+                + 0.2 * (1.0 - self.deepfake_probability)
+            )
+            if self.claims:
+                # OCR claims were fact-checked — blend claim truth with forensics.
+                # Claim truthfulness carries more weight (0.6) than image authenticity (0.4)
+                # because a real screenshot of misinformation must be caught.
+                claim_trust = sum(c.calibrated_trust for c in self.claims) / len(self.claims)
+                self.overall_trust = 0.6 * claim_trust + 0.4 * forensics_trust
+            else:
+                self.overall_trust = forensics_trust
+
+            # Out-of-context penalty: caption clearly doesn't match image content.
+            # Cap at 0.25 so an authentic image with a completely false caption
+            # always scores REJECT, not just FLAG.
+            if self.is_out_of_context:
+                self.overall_trust = min(self.overall_trust, 0.25)
+                if "OUT_OF_CONTEXT" not in self.active_suspicion_flags:
+                    self.active_suspicion_flags.append("OUT_OF_CONTEXT")
 
 
 # ---------------------------------------------------------------------------

@@ -25,12 +25,19 @@ class ContextCheckResult:
     reasoning: str = ""
 
 
-# Brand/entity recognition pattern (common entities in news/social media)
+# Entity/context recognition pattern (brands, orgs, people, historical events, places)
 _BRAND_RE = re.compile(
     r"\b(Apple|Google|Microsoft|Tesla|Amazon|Facebook|Meta|Twitter|Samsung|Nike|BMW|Toyota|Ford"
     r"|Pfizer|Moderna|NASA|WHO|UN|FBI|CIA"
-    r"|India|China|USA|UK|Russia|Ukraine|Israel|Iran|Pakistan"
-    r"|Biden|Trump|Modi)\b",
+    r"|India|China|USA|UK|Russia|Ukraine|Israel|Iran|Pakistan|Afghanistan|Syria|Gaza"
+    r"|Biden|Trump|Modi|Putin|Netanyahu|Zelensky|Obama|Clinton|Bush"
+    # Historical events / eras
+    r"|World War|WWII|WW2|Holocaust|Cold War|Vietnam War|Korean War|Gulf War|Iraq War"
+    r"|9/11|September 11|Pearl Harbor|Hiroshima|Nagasaki|D-Day|Normandy"
+    r"|Nazi|Hitler|Stalin|Churchill|Roosevelt|Auschwitz"
+    # Disasters / major events
+    r"|Tsunami|Earthquake|Hurricane|Pandemic|Covid|COVID-19|Chernobyl"
+    r"|Moon landing|Olympics|World Cup)\b",
     re.IGNORECASE,
 )
 
@@ -88,7 +95,9 @@ def check_context(
     if text_entities and visual_entities:
         overlap = len(text_entities & visual_entities) / max(len(text_entities), len(visual_entities))
     elif not text_entities:
-        overlap = 1.0  # no entities to mismatch
+        # No named entities in the caption — rely entirely on CLIP score.
+        # Set overlap to neutral; clip_flag alone will decide out-of-context.
+        overlap = 0.5
     else:
         overlap = 0.0  # entities in text not found visually
     result.entity_overlap = overlap
@@ -97,7 +106,8 @@ def check_context(
     result.mismatched_entities = list(text_entities - visual_entities)
 
     # 3. Out-of-context decision
-    clip_flag = clip_s < 0.15
+    # Lowered clip threshold: 0.25 catches borderline mismatches (e.g. "World War 2" on a suitcase)
+    clip_flag = clip_s < 0.25
     entity_flag = overlap < 0.2 and bool(text_entities)
 
     # 4. Context trust score

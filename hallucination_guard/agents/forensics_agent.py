@@ -95,13 +95,15 @@ class ForensicsAgent(BaseAgent):
         ela_r, fft_r, cnn_prob, florence_r, deepfake_res, watermark_res = processed
 
         # --- Image fusion score: 0.5*CNN + 0.25*ELA + 0.25*FFT ---
-        ela_energy = ela_r.get("mean_energy", 0.0) if isinstance(ela_r, dict) else 0.0
-        ela_norm = min(1.0, ela_energy / 20.0)
+        ela_raw = ela_r.get("mean_energy", 0.0) if isinstance(ela_r, dict) else 0.0
+        ela_norm = min(1.0, ela_raw / 20.0)
+        ela_energy = ela_norm  # store normalised [0,1] so UI percentage is meaningful
         fft_score = fft_r.get("spectral_score", 0.0) if isinstance(fft_r, dict) else 0.0
         has_periodic = fft_r.get("has_periodic", False) if isinstance(fft_r, dict) else False
 
         if not isinstance(cnn_prob, (int, float)):
             cnn_prob = 0.5
+        cnn_prob = min(1.0, max(0.0, float(cnn_prob)))  # clamp to [0, 1]
 
         fusion = (
             settings.cnn_weight * float(cnn_prob)
@@ -187,10 +189,10 @@ class ForensicsAgent(BaseAgent):
         confidence = fusion
 
         visual_facts = {
-            "mean_energy": ela_energy,
+            "mean_energy": ela_raw,
             "has_periodic": has_periodic,
             "caption": scene_caption,
-            "ela_energy": ela_energy,
+            "ela_energy": ela_energy,  # normalised [0,1]
             "ela_anomaly_regions": ela_r.get("anomaly_regions", []) if isinstance(ela_r, dict) else [],
             "anomaly_regions": ela_r.get("anomaly_regions", []) if isinstance(ela_r, dict) else [],
             "fft_score": fft_score,
@@ -218,7 +220,7 @@ class ForensicsAgent(BaseAgent):
         }
 
         reasoning = (
-            f"Image: cnn={float(cnn_prob):.3f}, ela={ela_energy:.2f}, "
+            f"Image: cnn={float(cnn_prob):.3f}, ela_raw={ela_raw:.2f}, ela_norm={ela_energy:.3f}, "
             f"fft={fft_score:.3f}, fusion={fusion:.3f}, "
             f"ocr_chars={len(ocr_text)}, objects={len(objects_detected)}, "
             f"claims_extracted={len(extracted_claims)}, "
@@ -251,7 +253,7 @@ class ForensicsAgent(BaseAgent):
             import numpy
             from PIL import Image
             from hallucination_guard.image.heuristic_fallback import heuristic_score
-            img = Image.open(path).convert("RGB").resize((512, 512))
+            img = Image.open(path).convert("RGB").resize((224, 224))
             arr = numpy.array(img, dtype=numpy.float32) / 255.0
             arr = arr[numpy.newaxis, ...]
             return float(hub.cnn.predict(arr)[0])

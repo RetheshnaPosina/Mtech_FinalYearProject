@@ -23,10 +23,13 @@ env/
 # Model cache (large binary files)
 model_cache/
 
-# Logs & audit
+# Logs
 *.log
 server.log
-audit_logs/
+
+# Audit logs — track the JSONL file, ignore any raw .log files inside
+!audit_logs/
+!audit_logs/*.jsonl
 
 # IDE
 .vscode/

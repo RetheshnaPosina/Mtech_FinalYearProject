@@ -20,8 +20,10 @@ env/
 .env.local
 .env.*.local
 
-# Model cache (large binary files)
-model_cache/
+# Model cache (large binary files — HuggingFace auto-downloads on first run)
+model_cache/*
+# Exception: custom trained CNN model (tracked via Git LFS)
+!model_cache/my_model.h5
 
 # Logs
 *.log

@@ -37,10 +37,10 @@ def log_result(result: TrustScore, request_id: str = "") -> None:
             {
                 "claim": c.claim,
                 "verdict": c.verdict.value,
-                "calibrated_trust": round(c.calibrated_trust * 100, 4),
+                "calibrated_trust": round(c.calibrated_trust, 4),
                 "difficulty_score": round(c.difficulty_score, 4),
                 "api_judge_used": c.api_judge_used,
-                "suspicion_flag": c.suspicion_flag,
+                "suspicion_flag": c.suspicion_flag.value if hasattr(c.suspicion_flag, "value") else str(c.suspicion_flag),
             }
             for c in result.claims
         ],

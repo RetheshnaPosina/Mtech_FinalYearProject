@@ -215,9 +215,9 @@
            ondragover="event.preventDefault();this.classList.add('drag')"
            ondragleave="this.classList.remove('drag')"
            ondrop="handleDrop(event)">
-        <input type="file" id="img-file-input" accept="image/*" onchange="previewFile(this)" />
+        <input type="file" id="img-file-input" accept="image/*,.jfif,.jfif-tbnl,.jpe,.tif,.tiff,.bmp,.heic,.heif,.avif,.svg,.ico,.raw,.cr2,.nef,.dng" onchange="previewFile(this)" />
         <p>&#x1F4C2; <strong>Click to browse</strong> or drag &amp; drop</p>
-        <p style="font-size:0.75rem;margin-top:4px">JPG, PNG, WEBP</p>
+        <p style="font-size:0.75rem;margin-top:4px">JPG, JPEG, JFIF, PNG, WEBP, BMP, TIFF, HEIC, AVIF, GIF &amp; more</p>
         <img id="preview-img" alt="preview" />
       </div>
     </div>
@@ -259,7 +259,7 @@
            ondragover="event.preventDefault();this.classList.add('drag')"
            ondragleave="this.classList.remove('drag')"
            ondrop="handleFullDrop(event)">
-        <input type="file" id="full-file-input" accept="image/*" onchange="previewFullFile(this)" />
+        <input type="file" id="full-file-input" accept="image/*,.jfif,.jfif-tbnl,.jpe,.tif,.tiff,.bmp,.heic,.heif,.avif,.svg,.ico,.raw,.cr2,.nef,.dng" onchange="previewFullFile(this)" />
         <p>&#x1F4C2; <strong>Click to browse</strong> or drag &amp; drop</p>
         <img id="full-preview-img" alt="preview" />
       </div>

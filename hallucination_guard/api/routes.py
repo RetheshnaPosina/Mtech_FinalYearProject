@@ -34,7 +34,18 @@ _rate_counts: Dict[str, List[float]] = collections.defaultdict(list)
 _rate_lock = Lock()
 _RATE_WINDOW_S = 60.0
 
-_ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff"}
+_ALLOWED_IMAGE_EXTS = {
+    ".jpg", ".jpeg", ".jfif", ".jpe",          # JPEG family (incl. JFIF)
+    ".png",                                     # PNG
+    ".webp",                                    # WebP
+    ".bmp",                                     # Bitmap
+    ".gif",                                     # GIF
+    ".tiff", ".tif",                            # TIFF
+    ".heic", ".heif",                           # HEIC/HEIF (Apple)
+    ".avif",                                    # AVIF
+    ".ico",                                     # ICO
+    ".raw", ".cr2", ".nef", ".dng",             # Camera RAW formats
+}
 
 
 def _check_rate_limit(client_ip: str) -> None:

@@ -143,7 +143,7 @@ class TrustScore:
     modal_weight: float = 0.2
 
     def compute_overall(self) -> None:
-        has_text = bool(self.claims)
+        has_text = bool(self.text)
         has_image = bool(self.image_path and self.image_fusion_score > 0)
 
         if not has_text and not has_image:

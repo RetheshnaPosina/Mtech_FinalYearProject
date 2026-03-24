@@ -17,8 +17,8 @@ Calibration
 -----------
 difficulty = Σ(vcade_w_* × d_*)   (from settings, default hand-tuned values)
 calibrated_trust:
-    SUPPORTED    → raw × (1 − 0.2 × (1 − difficulty))
-    NEI          → raw × (1 − 0.3 × (1 − difficulty))
+    SUPPORTED    → raw × (1 − 0.2 × difficulty)
+    NEI          → raw × (1 − 0.3 × difficulty)
     REFUTED      → raw × difficulty
 
 Isotonic enhancement (calibrate_from_logs):
@@ -123,11 +123,11 @@ def compute_vcade(
         # Data-driven path: isotonic regression fitted on audit logs
         calibrated = float(_calibrator.predict([[raw_trust, difficulty]])[0])
     elif verdict_label == "SUPPORTED":
-        # SUPPORTED: slight downward adjustment for high-difficulty claims
-        calibrated = raw_trust * (1.0 - 0.2 * (1.0 - difficulty))
+        # SUPPORTED: harder claim (more adversarial) → more downward adjustment
+        calibrated = raw_trust * (1.0 - 0.2 * difficulty)
     elif verdict_label == "NOT_ENOUGH_INFO":
-        # NEI: larger adjustment — less evidence → less confidence
-        calibrated = raw_trust * (1.0 - 0.3 * (1.0 - difficulty))
+        # NEI: larger adjustment for harder claims — high difficulty = low confidence
+        calibrated = raw_trust * (1.0 - 0.3 * difficulty)
     else:
         # REFUTED: scale by difficulty (easy fact failed = very suspicious)
         calibrated = raw_trust * difficulty

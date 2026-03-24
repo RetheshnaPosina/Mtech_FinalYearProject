@@ -12,7 +12,7 @@ from hallucination_guard.config import settings
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff"}
+_ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".jfif", ".jpe", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif", ".heic", ".heif", ".avif", ".ico"}
 
 # Lazy singleton for ForensicsAgent (avoid re-loading models every call)
 _forensics = None

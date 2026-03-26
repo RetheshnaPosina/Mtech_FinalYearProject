@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_judge_model: str = "models/gemini-2.0-flash"
 
+    # Real-time evidence sources
+    tavily_api_key_enc: str = ""
+    tavily_api_key: str = ""
+    fact_check_api_key_enc: str = ""
+    fact_check_api_key: str = ""
+
     # Judge settings
     judge_api_disagreement_threshold: float = 0.15
     monthly_api_budget_usd: float = 10.0

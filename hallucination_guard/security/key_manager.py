@@ -102,6 +102,24 @@ class KeyManager:
     def has_google_search(self) -> bool:
         return bool(self.get_google_search_key())
 
+    def get_tavily_key(self) -> str:
+        from hallucination_guard.config import settings
+        if settings.tavily_api_key_enc:
+            return self.decrypt(settings.tavily_api_key_enc)
+        return settings.tavily_api_key or ""
+
+    def get_fact_check_key(self) -> str:
+        from hallucination_guard.config import settings
+        if settings.fact_check_api_key_enc:
+            return self.decrypt(settings.fact_check_api_key_enc)
+        return settings.fact_check_api_key or ""
+
+    def has_tavily(self) -> bool:
+        return bool(self.get_tavily_key())
+
+    def has_fact_check(self) -> bool:
+        return bool(self.get_fact_check_key())
+
 
 # Module-level singleton
 key_manager = KeyManager()

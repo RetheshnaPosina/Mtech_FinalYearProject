@@ -1,5 +1,12 @@
-"""Evidence retrieval: Google Search API -> Wikipedia REST API -> curated mock store.
-Wikipedia is free, no API key required, reliable for demo claims.
+"""Evidence retrieval: Fact Check API -> Tavily -> Google -> Wikipedia -> mock store.
+
+Source priority (highest signal first):
+  1. Google Fact Check Tools API — directly indexes Snopes, PolitiFact, FactCheck.org
+  2. Tavily Search API           — real-time web search, clean text, covers breaking news
+  3. Google Custom Search API    — broad web search (requires key + engine ID)
+  4. Wikipedia REST API          — background context, no key needed
+  5. Mock store                  — offline fallback for common demo claims
+
 Results cached with 1-hour TTL to prevent redundant network calls.
 """
 from __future__ import annotations
@@ -136,7 +143,7 @@ async def _wikipedia_search_async(query: str, max_results: int = 5) -> List[Evid
             titles_param = urllib.parse.quote("|".join(titles[:2]))
             extract_url = (
                 f"https://en.wikipedia.org/w/api.php"
-                f"?action=query&prop=extracts&exintro&titles={titles_param}"
+                f"?action=query&prop=extracts&exintro&explaintext&titles={titles_param}"
                 f"&format=json&exsentences=3&exlimit=2"
             )
             resp2 = await client.get(extract_url)
@@ -191,7 +198,7 @@ def _wikipedia_search(query: str, max_results: int = 5) -> List[EvidenceItem]:
         titles_param = urllib.parse.quote("|".join(titles[:2]))
         extract_url = (
             f"https://en.wikipedia.org/w/api.php"
-            f"?action=query&prop=extracts&exintro&titles={titles_param}"
+            f"?action=query&prop=extracts&exintro&explaintext&titles={titles_param}"
             f"&format=json&exsentences=3&exlimit=2"
         )
         req2 = urllib.request.Request(extract_url, headers=_HEADERS)
@@ -218,6 +225,79 @@ def _wikipedia_search(query: str, max_results: int = 5) -> List[EvidenceItem]:
 
     except Exception as e:
         logger.debug("Wikipedia sync search failed: %s", e)
+        return []
+
+
+async def _tavily_search(query: str, max_results: int = 5) -> List[EvidenceItem]:
+    """Tavily real-time web search — returns clean text, covers breaking news."""
+    api_key = key_manager.get_tavily_key()
+    if not api_key:
+        return []
+    try:
+        from tavily import AsyncTavilyClient
+        client = AsyncTavilyClient(api_key=api_key)
+        response = await client.search(
+            query=query,
+            search_depth="advanced",
+            max_results=max_results,
+            include_raw_content=False,
+        )
+        items: List[EvidenceItem] = []
+        for r in response.get("results", []):
+            content = r.get("content", "").strip()
+            if not content:
+                continue
+            items.append(EvidenceItem(
+                text=content[:500],
+                source=f"tavily:{r.get('url', '')}",
+                relevance=float(r.get("score", 0.8)),
+                timestamp_retrieved=time.time(),
+                url=r.get("url", ""),
+            ))
+        return items
+    except Exception as e:
+        logger.debug("Tavily search failed: %s", e)
+        return []
+
+
+async def _fact_check_search(query: str, max_results: int = 5) -> List[EvidenceItem]:
+    """Google Fact Check Tools API — searches Snopes, PolitiFact, FactCheck.org etc."""
+    api_key = key_manager.get_fact_check_key()
+    if not api_key:
+        return []
+    try:
+        import httpx
+        params = {
+            "query": query,
+            "key": api_key,
+            "pageSize": max_results,
+            "languageCode": "en",
+        }
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=5.0) as client:
+            resp = await client.get(
+                "https://factchecktools.googleapis.com/v1alpha1/claims:search",
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        items: List[EvidenceItem] = []
+        for claim in data.get("claims", []):
+            claim_text = claim.get("text", "").strip()
+            for review in claim.get("claimReview", []):
+                publisher = review.get("publisher", {}).get("name", "unknown")
+                rating = review.get("textualRating", "")
+                snippet = f'Claim: "{claim_text}" — Rated "{rating}" by {publisher}.'
+                items.append(EvidenceItem(
+                    text=snippet,
+                    source=f"factcheck:{publisher}",
+                    relevance=0.95,
+                    timestamp_retrieved=time.time(),
+                    url=review.get("url", ""),
+                ))
+        return items
+    except Exception as e:
+        logger.debug("Fact Check API search failed: %s", e)
         return []
 
 
@@ -274,28 +354,43 @@ async def retrieve_evidence(query: str, top_k: int = 3) -> List[EvidenceItem]:
     loop = asyncio.get_event_loop()
     items: List[EvidenceItem] = []
 
-    # 1. Google Search (if key available)
-    if key_manager.has_google_search():
+    # 1. Google Fact Check Tools API (highest signal — directly indexes fact-checkers)
+    if key_manager.has_fact_check():
+        try:
+            fc_items = await _fact_check_search(query, max_results=top_k)
+            items.extend(fc_items)
+        except Exception as e:
+            logger.debug("Fact Check API failed: %s", e)
+
+    # 2. Tavily real-time web search (breaking news, social media claims)
+    if len(items) < top_k and key_manager.has_tavily():
+        try:
+            tavily_items = await _tavily_search(query, max_results=top_k)
+            items.extend(tavily_items)
+        except Exception as e:
+            logger.debug("Tavily search failed: %s", e)
+
+    # 3. Google Custom Search API
+    if len(items) < top_k and key_manager.has_google_search():
         try:
             google_items = await loop.run_in_executor(None, _google_search, query, top_k)
             items.extend(google_items)
         except Exception as e:
             logger.debug("Google search failed: %s", e)
 
-    # 2. Wikipedia (async)
+    # 4. Wikipedia (background context, no key needed)
     if len(items) < top_k:
         try:
             wiki_items = await _wikipedia_search_async(query, max_results=top_k)
             items.extend(wiki_items)
         except Exception:
-            # Fallback to sync Wikipedia
             try:
                 wiki_items = await loop.run_in_executor(None, _wikipedia_search, query, top_k)
                 items.extend(wiki_items)
             except Exception:
                 pass
 
-    # 3. Mock store fallback
+    # 5. Mock store fallback (offline)
     if not items:
         items = _mock_lookup(query)
 

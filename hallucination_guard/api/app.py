@@ -1,6 +1,9 @@
 """AMADA FastAPI application entry point."""
 from __future__ import annotations
 
+import asyncio
+import logging
+from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +14,32 @@ from pathlib import Path
 from hallucination_guard.api.routes import router
 from hallucination_guard.config import settings
 
+logger = logging.getLogger(__name__)
+
+
+def _preload_models() -> None:
+    """Eagerly load all heavyweight models so the first request is not slow."""
+    try:
+        import hallucination_guard.models.model_hub as hub_module
+        h = hub_module.hub
+        _ = h.cnn          # TensorFlow CNN
+        _ = h.clip         # CLIP ViT
+        _ = h.nli          # NLI model
+        _ = h.ai_detector  # HuggingFace ViT AI-image detector
+        _ = h.florence     # Florence-2
+        logger.info("Model warmup complete.")
+    except Exception as e:
+        logger.warning("Model warmup error (non-fatal): %s", e)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Preload all models in a background thread on server start."""
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _preload_models)
+    yield
+
+
 app = FastAPI(
     title="HallucinationGuard AMADA v6.0",
     description=(
@@ -20,6 +49,7 @@ app = FastAPI(
     version="6.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

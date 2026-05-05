@@ -29,6 +29,7 @@ class ModelHub(object):
                 inst._sentence = None
                 inst._cnn = None
                 inst._florence = None
+                inst._ai_detector = None
                 cls._instance = inst
         return cls._instance
 
@@ -159,6 +160,33 @@ class ModelHub(object):
         return self._cnn
 
     # ------------------------------------------------------------------
+    # AI Image Detector (ViT fine-tuned for real vs AI-generated)
+    # ------------------------------------------------------------------
+
+    @property
+    def ai_detector(self) -> Any:
+        """HuggingFace pipeline for AI-generated image detection."""
+        if self._ai_detector is None:
+            try:
+                from hallucination_guard.config import settings
+                from transformers import pipeline
+                loaded = pipeline(
+                    "image-classification",
+                    model=str(settings.ai_detector_model_id),
+                    model_kwargs={"cache_dir": str(settings.model_cache_dir)},
+                    framework="pt",   # force PyTorch — avoids Keras 3 conflict
+                )
+                self._ai_detector = loaded
+                logger.info("AI image detector model loaded: %s", settings.ai_detector_model_id)
+            except Exception as e:
+                logger.warning("AI detector model load failed (heuristic fallback active): %s", e)
+                self._ai_detector = _LOAD_FAILED
+        if self._ai_detector is _LOAD_FAILED:
+            self._ai_detector = None
+            return None
+        return self._ai_detector
+
+    # ------------------------------------------------------------------
     # Florence-2 (unified OCR + OD + Dense Caption, 230M, CPU-feasible)
     # ------------------------------------------------------------------
 
@@ -202,3 +230,7 @@ def get_sentence_model():
 
 def get_cnn_model():
     return hub.cnn
+
+
+def get_ai_detector():
+    return hub.ai_detector

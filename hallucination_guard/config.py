@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     google_search_api_key: str = ""
     gemini_api_key_enc: str = ""
     gemini_api_key: str = ""
-    gemini_judge_model: str = "models/gemini-2.0-flash"
+    gemini_judge_model: str = "models/gemini-2.5-flash"
 
     # Real-time evidence sources
     tavily_api_key_enc: str = ""
@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     # Claim processing
     max_claims_per_request: int = 20
     evidence_top_k: int = 5
-    adversarial_top_k: int = 3
+    adversarial_top_k: int = 2
     nli_batch_size: int = 8
     debate_max_rounds: int = 3
 
@@ -115,6 +115,7 @@ class Settings(BaseSettings):
     clip_model_id: str = "openai/clip-vit-large-patch14"
     sentence_model_id: str = "sentence-transformers/all-MiniLM-L6-v2"
     cnn_model_path: str = "./model_cache/my_model.h5"
+    ai_detector_model_id: str = "umm-maybe/AI-image-detector"
 
 
 settings = Settings()

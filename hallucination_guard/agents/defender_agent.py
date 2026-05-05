@@ -42,7 +42,7 @@ class DefenderAgent(BaseAgent):
             queries.append(f"evidence supporting original claim against: {counter_argument}")
 
         async with evidence_pool.fetch_lock(claim_key):
-            if not evidence_pool.is_populated():
+            if not evidence_pool.is_populated(claim_key):
                 for q in queries:
                     items = await retrieve_evidence(q, top_k=settings.evidence_top_k)
                     for item in items:
@@ -58,7 +58,13 @@ class DefenderAgent(BaseAgent):
                             evidence_pool.add(claim_key, item)
 
         pool_evidence = evidence_pool.get(claim_key)
-        matrix = build_matrix(claim, pool_evidence, [])
+        # Fix: exclude adversarial-tagged items (added by Prosecutor) from the
+        # Defender's NLI matrix — they contaminate avg_ent and push it below 0.45.
+        # Adversarial items are still in the pool for VCADE credibility ranking.
+        supporting_evidence = [e for e in pool_evidence if not e.is_adversarial]
+        if not supporting_evidence:
+            supporting_evidence = pool_evidence  # fallback: use all if pool not tagged
+        matrix = await build_matrix(claim, supporting_evidence, [])
 
         original_rows = [r for r in matrix if not r.is_adversarial]
         avg_ent = (
@@ -70,7 +76,10 @@ class DefenderAgent(BaseAgent):
             if original_rows else 0.0
         )
 
-        if avg_ent > 0.6:
+        if avg_ent > 0.45:
+            # Lowered from 0.6 → 0.45: NLI entailment over a mixed evidence pool
+            # rarely exceeds 0.6 even for well-supported claims because adversarial
+            # queries pollute the shared pool with off-topic evidence.
             verdict = Verdict.SUPPORTED
             confidence = avg_ent
         elif avg_contra > 0.5:
@@ -78,7 +87,10 @@ class DefenderAgent(BaseAgent):
             confidence = avg_contra
         else:
             verdict = Verdict.NOT_ENOUGH_INFO
-            confidence = 0.5
+            # Use actual avg_ent as confidence signal instead of hardcoded 0.5.
+            # This prevents the Defender always contributing 0.5 to the judge vote,
+            # which caused REFUTED to dominate even for well-evidenced true claims.
+            confidence = max(0.4, avg_ent)
 
         # strongest_point: the evidence sentence with the highest entailment score
         strongest_row = max(original_rows, key=lambda r: r.entailment) if original_rows else None

@@ -73,13 +73,16 @@ async def execute(
     if text:
         claims = await verify_text(text, use_api_judge=use_api_judge)
         result.claims = claims
+        if not claims:
+            logger.warning("No verifiable claims extracted from user text: %r", text[:120])
+            result.active_suspicion_flags.append("no_verifiable_claims_in_text")
 
         if claims:
             supported = sum(1 for c in claims if c.verdict == Verdict.SUPPORTED)
             avg_trust = sum(c.calibrated_trust for c in claims) / len(claims)
             result.overall_trust = avg_trust
             result.awp_fact_score = supported / len(claims)
-            result.fact_score = result.awp_fact_score
+            result.fact_score = avg_trust  # calibrated trust average, not binary support ratio
             result.adversarial_detection_rate = sum(1 for c in claims if c.api_judge_used) / len(claims)
             result.active_suspicion_flags = [
                 c.suspicion_flag.value
@@ -105,7 +108,7 @@ async def execute(
         forensics_task = asyncio.create_task(_forensics.run_with_image(safe_path, caption))
 
         try:
-            forensics_msg, forensics_result = await asyncio.wait_for(forensics_task, timeout=120.0)
+            forensics_msg, forensics_result = await asyncio.wait_for(forensics_task, timeout=180.0)
             result.api_calls_made += forensics_result.get("api_calls_made", 0)
             result.cnn_probability = forensics_result.get("cnn_probability", 0.0)
             result.ela_energy = forensics_result.get("ela_energy", 0.0)
@@ -126,10 +129,12 @@ async def execute(
             result.faces_found = forensics_result.get("faces_found", False)
             result.deepfake_probability = forensics_result.get("deepfake_probability", 0.0)
             result.watermark_type = forensics_result.get("watermark_type", "")
+            result.ai_generated_probability = forensics_result.get("ai_generated_probability", 0.0)
+            result.ai_detector_available = forensics_result.get("ai_detector_available", False)
             visual_facts = forensics_result
 
         except Exception as e:
-            logger.error("Forensics failed: %s", e)
+            logger.error("Forensics failed: %s", type(e).__name__ if not str(e) else e)
 
         # --- Tier 3: OCR claim verification + Cross-modal consistency (CMCD) ---
         if tier >= 3 and visual_facts:

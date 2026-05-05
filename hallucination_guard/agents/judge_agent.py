@@ -57,7 +57,7 @@ def _local_verdict(messages: List[AgentMessage]) -> Tuple[Verdict, float, str]:
     return Verdict(best), scores[best], reasoning
 
 
-def judge(
+async def judge(
     claim: str,
     agent_messages: List[AgentMessage],
     use_api: bool = True,
@@ -83,19 +83,20 @@ def judge(
     # Extract per-agent confidence
     prosecutor = next((m.confidence for m in agent_messages if m.agent == "prosecutor"), 0.5)
     defender = next((m.confidence for m in agent_messages if m.agent == "defender"), 0.5)
-    total_evidence = sum(len(m.evidence_used) for m in agent_messages)
 
     gap = abs(prosecutor - defender)
 
-    # Convergence check: agents agree → skip API
-    if not use_api or gap <= settings.judge_api_disagreement_threshold:
+    # If use_api=False, always use local vote (ignore gap)
+    if not use_api:
         v, conf, reasoning = _local_verdict(agent_messages)
         return v, conf, "converged: " + reasoning, False
+
+    # use_api=True: skip convergence check — always attempt API first
 
     # Try Claude API
     if key_manager.has_anthropic():
         try:
-            v, conf, reasoning = _api_judge(claim, agent_messages)
+            v, conf, reasoning = await _api_judge(claim, agent_messages)
             return v, conf, "[claude] " + reasoning, True
         except Exception as e:
             logger.warning("Claude judge failed, trying Gemini: %s", e)
@@ -103,7 +104,7 @@ def judge(
     # Try Gemini API
     if key_manager.has_gemini():
         try:
-            v, conf, reasoning = _gemini_judge(claim, agent_messages)
+            v, conf, reasoning = await _gemini_judge(claim, agent_messages)
             return v, conf, "[gemini] " + reasoning, True
         except Exception as e:
             logger.warning("Gemini judge failed, falling back to local: %s", e)
@@ -113,7 +114,7 @@ def judge(
     return v, conf, "fallback: " + reasoning, False
 
 
-def _api_judge(
+async def _api_judge(
     claim: str,
     agent_messages: List[AgentMessage],
 ) -> Tuple[Verdict, float, str]:
@@ -121,6 +122,9 @@ def _api_judge(
 
     Fix #5: validates JSON response keys, verdict enum, confidence in [0,1].
     Fix #6: timeout enforced via asyncio.wait_for.
+    Fix async: uses run_in_executor so the synchronous Anthropic SDK client
+    does not block the event loop (was using run_until_complete which raises
+    RuntimeError when called from within an already-running loop).
     """
     import anthropic
     import asyncio
@@ -139,22 +143,21 @@ def _api_judge(
 
     api_key = key_manager.get_anthropic_key()
     client = anthropic.Anthropic(api_key=api_key)
+    payload = json.dumps({"claim_id": claim[:150], "agent_reports": summaries})
 
     loop = asyncio.get_event_loop()
-
-    response = loop.run_in_executor(
-        None,
-        lambda: client.messages.create(
-            model=settings.judge_model,
-            max_tokens=300,
-            system=_SYSTEM_PROMPT,
-            messages=[{
-                "role": "user",
-                "content": json.dumps({"claim_id": claim[:150], "agent_reports": summaries}),
-            }],
+    response = await asyncio.wait_for(
+        loop.run_in_executor(
+            None,
+            lambda: client.messages.create(
+                model=settings.judge_model,
+                max_tokens=300,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": payload}],
+            ),
         ),
+        timeout=settings.judge_api_timeout_s,
     )
-    response = loop.run_until_complete(asyncio.wait_for(response, timeout=settings.judge_api_timeout_s))
 
     raw = response.content[0].text.strip()
 
@@ -164,7 +167,9 @@ def _api_judge(
     if "```" in raw:
         raw = raw.split("```")[0]
 
-    data = json.loads(raw)
+    # Extract first complete JSON object only (handles extra trailing data)
+    obj, _ = json.JSONDecoder().raw_decode(raw.strip())
+    data = obj
 
     # Fix #5: validate required keys
     required = {"verdict", "confidence", "reasoning"}
@@ -185,7 +190,7 @@ def _api_judge(
     return Verdict(data["verdict"]), conf, reasoning
 
 
-def _gemini_judge(
+async def _gemini_judge(
     claim: str,
     agent_messages: List[AgentMessage],
 ) -> Tuple[Verdict, float, str]:
@@ -220,15 +225,17 @@ def _gemini_judge(
         model = generativeai.GenerativeModel(settings.gemini_judge_model)
         response = model.generate_content(
             prompt,
-            generation_config={"max_output_tokens": 300, "temperature": 0.1},
+            generation_config={
+                "max_output_tokens": 2048,
+                "temperature": 0.1,
+                "response_mime_type": "application/json",
+            },
         )
         return response.text.strip()
 
-    raw = loop.run_until_complete(
-        asyncio.wait_for(
-            loop.run_in_executor(None, _call),
-            timeout=settings.judge_api_timeout_s,
-        )
+    raw = await asyncio.wait_for(
+        loop.run_in_executor(None, _call),
+        timeout=settings.judge_api_timeout_s,
     )
 
     # Strip markdown code fences
@@ -237,7 +244,10 @@ def _gemini_judge(
     if "```" in raw:
         raw = raw.split("```")[0]
 
-    data = json.loads(raw)
+    # Extract first complete JSON object only (handles "extra data" when model
+    # appends additional text or a second JSON block after the response)
+    obj, _ = json.JSONDecoder().raw_decode(raw.strip())
+    data = obj
 
     # Fix #5: validate
     required = {"verdict", "confidence", "reasoning"}

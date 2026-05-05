@@ -101,11 +101,20 @@ async def debate_claim(
 
     # ------------------------------------------------------------------
     # Judge verdict
+    # Fix: in Round 2, only pass the LATEST message per agent to the judge.
+    # Passing both R1+R2 prosecutor messages double-weights prosecutor (0.4+0.4=0.8)
+    # and R2 Prosecutor is explicitly tasked to find counter-evidence → biased REFUTED.
+    # Judge sees: R2 prosecutor, R2 defender, R1 investigator (one per agent).
     # ------------------------------------------------------------------
-    verdict, confidence, reasoning, api_used = judge(
+    if debate_rounds == 2:
+        judge_messages = [prosecutor_msg2, defender_msg2, investigator_msg]
+    else:
+        judge_messages = all_messages
+
+    verdict, confidence, reasoning, api_used = await judge(
         claim=claim_text,
-        agent_messages=all_messages,
-        use_api=use_api_judge or (gap > settings.judge_api_disagreement_threshold),
+        agent_messages=judge_messages,
+        use_api=use_api_judge,
     )
 
     # ------------------------------------------------------------------
@@ -120,11 +129,14 @@ async def debate_claim(
         all_messages[2] if debate_rounds == 2 else prosecutor_msg
     )
 
+    # VCADE difficulty uses Round 1 Prosecutor's best_alt_support (unbiased).
+    # Round 2 Prosecutor is explicitly told to hunt for counter-evidence, so its
+    # best_alt_support is artificially inflated and should not drive d_adversarial.
     vcade_result = compute_vcade(
         raw_trust=confidence,
         verdict_label=verdict.value,
         evidence=top_evidence,
-        best_alt_support=latest_prosecutor.best_alt_support,
+        best_alt_support=prosecutor_msg.best_alt_support,  # always R1 (unbiased)
         entity_count=sum(
             1 for msg in all_messages
             if hasattr(msg, "suspicion_flags")
@@ -144,9 +156,13 @@ async def debate_claim(
     # Best adversarial hypothesis for correction suggestion
     best_alt_hypothesis = latest_prosecutor.adversarial_hypotheses[0] \
         if latest_prosecutor.adversarial_hypotheses else ""
-    correction_suggestion = (
-        f"Consider: {best_alt_hypothesis}" if best_alt_hypothesis else ""
-    )
+    # "someone other than X" is an internal NLI trick — don't expose it raw to users
+    if best_alt_hypothesis and "someone other than" in best_alt_hypothesis:
+        correction_suggestion = f"Verify the identity/attribution in this claim against a trusted source."
+    elif best_alt_hypothesis:
+        correction_suggestion = f"Consider: {best_alt_hypothesis}"
+    else:
+        correction_suggestion = ""
 
     nli_entailment = (
         sum(e.relevance for e in top_evidence) / len(top_evidence)

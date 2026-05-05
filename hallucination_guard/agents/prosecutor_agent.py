@@ -52,12 +52,15 @@ class ProsecutorAgent(BaseAgent):
             queries.append(f"evidence against: {counter_argument}")
 
         # Populate shared evidence pool (lock prevents duplicate fetches)
+        # NOTE: items are tagged is_adversarial=True so the Defender can
+        # exclude them from its own NLI computation (Fix: pool contamination).
         claim_key = claim[:64]
         async with evidence_pool.fetch_lock(claim_key):
-            if not evidence_pool.is_populated():
+            if not evidence_pool.is_populated(claim_key):
                 for q in queries:
                     items = await retrieve_evidence(q, top_k=settings.evidence_top_k)
                     for item in items:
+                        item.is_adversarial = True
                         evidence_pool.add(claim_key, item)
             else:
                 # Pool already seeded; fetch counter-evidence if new query introduced
@@ -67,12 +70,19 @@ class ProsecutorAgent(BaseAgent):
                         top_k=max(2, settings.evidence_top_k // 2),
                     )
                     for item in extra:
+                        item.is_adversarial = True
                         evidence_pool.add(claim_key, item)
 
         pool_evidence = evidence_pool.get(claim_key)
 
-        # Build entailment matrix: original claim vs adversarial hypotheses
-        matrix = build_matrix(claim, pool_evidence, adv_hypotheses)
+        # Fix: build AWP matrix using only NEUTRAL evidence (non-adversarial items).
+        # Adversarial evidence items have low entailment for the original claim and
+        # high entailment for adversarial hypotheses — using them biases AWP toward
+        # REFUTED even for well-evidenced true claims.
+        neutral_evidence = [e for e in pool_evidence if not e.is_adversarial]
+        if not neutral_evidence:
+            neutral_evidence = pool_evidence  # fallback when pool not yet seeded
+        matrix = await build_matrix(claim, neutral_evidence, adv_hypotheses)
 
         # AWP score: original_support / (original_support + best_alt_support)
         awp = compute_awp_score(matrix)

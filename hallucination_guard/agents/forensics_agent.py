@@ -63,6 +63,7 @@ class ForensicsAgent(BaseAgent):
             loop.run_in_executor(None, self._florence, image_path),
             loop.run_in_executor(None, self._deepface, image_path),
             loop.run_in_executor(None, self._watermark, image_path),
+            loop.run_in_executor(None, self._ai_detector, image_path),
             return_exceptions=True,
         )
 
@@ -70,8 +71,9 @@ class ForensicsAgent(BaseAgent):
         from hallucination_guard.image.florence_extractor import FlorenceResult
         from hallucination_guard.image.deepfake_detector import DeepfakeResult
         from hallucination_guard.image.watermark_detector import WatermarkResult
+        from hallucination_guard.image.ai_image_detector import AIImageResult
 
-        ela_r_raw, fft_r_raw, cnn_raw, florence_raw, deepfake_raw, watermark_raw = raw_results
+        ela_r_raw, fft_r_raw, cnn_raw, florence_raw, deepfake_raw, watermark_raw, ai_raw = raw_results
 
         # Per-task fallback defaults (Fix #12)
         defaults = {
@@ -81,9 +83,10 @@ class ForensicsAgent(BaseAgent):
             "florence": FlorenceResult(),
             "deepfake": DeepfakeResult(),
             "watermark": WatermarkResult(),
+            "ai_detector": AIImageResult(ai_probability=0.5, label="unknown", model_available=False, signals={}),
         }
 
-        labels = ["ela", "fft", "cnn", "florence", "deepfake", "watermark"]
+        labels = ["ela", "fft", "cnn", "florence", "deepfake", "watermark", "ai_detector"]
         processed = []
         for label, exc in zip(labels, raw_results):
             if isinstance(exc, Exception):
@@ -92,7 +95,7 @@ class ForensicsAgent(BaseAgent):
             else:
                 processed.append(exc)
 
-        ela_r, fft_r, cnn_prob, florence_r, deepfake_res, watermark_res = processed
+        ela_r, fft_r, cnn_prob, florence_r, deepfake_res, watermark_res, ai_res = processed
 
         # --- Image fusion score: 0.5*CNN + 0.25*ELA + 0.25*FFT ---
         ela_raw = ela_r.get("mean_energy", 0.0) if isinstance(ela_r, dict) else 0.0
@@ -159,6 +162,15 @@ class ForensicsAgent(BaseAgent):
             faces_found = False
             deepfake_probability = 0.0
 
+        if isinstance(ai_res, AIImageResult):
+            ai_generated_probability = ai_res.ai_probability
+            ai_detector_available = ai_res.model_available
+            ai_detector_label = ai_res.label
+        else:
+            ai_generated_probability = 0.5
+            ai_detector_available = False
+            ai_detector_label = "unknown"
+
         if isinstance(watermark_res, WatermarkResult):
             watermark_present = watermark_res.watermark_present
             watermark_type = watermark_res.watermark_type
@@ -217,11 +229,15 @@ class ForensicsAgent(BaseAgent):
             "watermark_present": watermark_present,
             "watermark_type": watermark_type,
             "per_claim_clip": per_claim_clip,
+            "ai_generated_probability": ai_generated_probability,
+            "ai_detector_available": ai_detector_available,
+            "ai_detector_label": ai_detector_label,
         }
 
         reasoning = (
             f"Image: cnn={float(cnn_prob):.3f}, ela_raw={ela_raw:.2f}, ela_norm={ela_energy:.3f}, "
             f"fft={fft_score:.3f}, fusion={fusion:.3f}, "
+            f"ai_generated={ai_generated_probability:.3f}({ai_detector_label}), "
             f"ocr_chars={len(ocr_text)}, objects={len(objects_detected)}, "
             f"claims_extracted={len(extracted_claims)}, "
             f"out_of_context={is_out_of_context}, context_trust={context_trust:.3f}, "
@@ -279,6 +295,10 @@ class ForensicsAgent(BaseAgent):
     def _watermark(self, path: str):
         from hallucination_guard.image.watermark_detector import detect_watermark
         return detect_watermark(path)
+
+    def _ai_detector(self, path: str):
+        from hallucination_guard.image.ai_image_detector import detect_ai_generated
+        return detect_ai_generated(path)
 
     def _score_claims(self, path: str, claims: list):
         from hallucination_guard.image.claim_image_matcher import score_claims_against_image

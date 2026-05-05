@@ -394,10 +394,13 @@ async def retrieve_evidence(query: str, top_k: int = 3) -> List[EvidenceItem]:
     if not items:
         items = _mock_lookup(query)
 
-    # Deduplicate by text, sort by relevance descending
+    # Deduplicate by text, filter low-relevance items, sort by relevance descending
+    _RELEVANCE_THRESHOLD = 0.5
     seen: set = set()
     unique: List[EvidenceItem] = []
     for ev in sorted(items, key=lambda e: e.relevance, reverse=True):
+        if ev.relevance < _RELEVANCE_THRESHOLD:
+            continue
         if ev.text not in seen:
             seen.add(ev.text)
             unique.append(ev)

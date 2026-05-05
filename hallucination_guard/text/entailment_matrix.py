@@ -1,6 +1,7 @@
 """Build NLI entailment matrix across (claim, evidence, alternatives). AWP core."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -20,7 +21,7 @@ class MatrixRow:
     claim_text: str = ""
 
 
-def build_matrix(
+async def build_matrix(
     claim_text: str,
     evidence: List[EvidenceItem],
     adversarial: List[AdversarialHypothesis],
@@ -66,8 +67,10 @@ def build_matrix(
     # Build NLI input list: (premise=evidence, hypothesis=claim/adversarial)
     nli_inputs = [(ev_text, hyp) for hyp, ev_text, _ in pairs]
 
-    # Batch inference
-    nli_results = hub.nli.predict_batch(nli_inputs)
+    # Batch inference — run synchronous NLI in executor so it doesn't
+    # block the async event loop (fixes 200s+ latency on CPU inference).
+    loop = asyncio.get_event_loop()
+    nli_results = await loop.run_in_executor(None, hub.nli.predict_batch, nli_inputs)
 
     rows: List[MatrixRow] = []
     for (hyp_text, ev_text, is_adv), nli in zip(pairs, nli_results):

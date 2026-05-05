@@ -126,11 +126,17 @@ def compute_vcade(
         # SUPPORTED: harder claim (more adversarial) → more downward adjustment
         calibrated = raw_trust * (1.0 - 0.2 * difficulty)
     elif verdict_label == "NOT_ENOUGH_INFO":
-        # NEI: larger adjustment for harder claims — high difficulty = low confidence
+        # NEI: larger adjustment for harder claims — high difficulty = low confidence.
+        # Cap at 0.5: "cannot verify" is inherently uncertain and must never reach
+        # PUBLISH territory (threshold 0.7). Unanimous NEI is not evidence of truth.
         calibrated = raw_trust * (1.0 - 0.3 * difficulty)
+        calibrated = min(calibrated, 0.5)
     else:
-        # REFUTED: scale by difficulty (easy fact failed = very suspicious)
-        calibrated = raw_trust * difficulty
+        # REFUTED: raw_trust = P(claim is false); calibrated_trust = P(content is true)
+        # Start from residual truth probability (1 - raw_trust), then apply difficulty:
+        # - Low difficulty REFUTED  → easy fact failed → very suspicious → aggressive penalty
+        # - High difficulty REFUTED → hard to verify  → may still be true → softer penalty
+        calibrated = (1.0 - raw_trust) * (1.0 - 0.3 * (1.0 - difficulty))
 
     calibrated = min(1.0, max(0.0, calibrated))
 

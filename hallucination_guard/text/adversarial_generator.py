@@ -82,37 +82,58 @@ def _apply_negation(text: str) -> str:
 # Temporal substitution helpers
 # ---------------------------------------------------------------------------
 
-# Maps year strings to plausible alternatives (±1/±2 years)
-_TEMPORAL_SUBS: Dict[str, List[str]] = {
-    "2023": ["2022", "2024"],
-    "2022": ["2021", "2023"],
-    "2021": ["2020", "2022"],
-    "2020": ["2019", "2021"],
-    "2019": ["2018", "2020"],
-    "2018": ["2017", "2019"],
+_KEYWORD_REPLACEMENTS = {
+    "current":  "former",
+    "now":      "formerly",
+    "today":    "previously",
+    "latest":   "outdated",
+    "recent":   "outdated",
+    "still":    "no longer",
+    "anymore":  "formerly",
 }
 
-_TEMPORAL_KEYWORDS = re.compile(
-    r"\b(current|now|today|latest|recent|still|anymore"
-    r"|as of \d{4}|january|february|march|april|may|june"
-    r"|july|august|september|october|november|december)\b",
-    re.IGNORECASE,
-)
 
-_STALE_SUBS = ["formerly", "previously", "years ago", "in the past"]
+def _apply_temporal_shift(text: str):
+    """Replace time references with staleness markers.
 
+    Returns the modified string, or None if no temporal signal found.
+    None signals _strategy_temporal_alt to return [] (emit nothing).
 
-def _apply_temporal_shift(text: str) -> str:
-    """Replace time references with staleness markers."""
-    # First try year substitution
+    Tier 1 — year substitution:  "2020" → "2019"
+    Tier 2 — keyword substitution: "current" → "former"
+    Tier 3 — no signal → None (do NOT emit a broken hypothesis)
+    """
+    # ── Tier 1: year substitution ────────────────────────────────────────
+    _TEMPORAL_SUBS = {
+        "2023": ["2022", "2024"],
+        "2022": ["2021", "2023"],
+        "2021": ["2020", "2022"],
+        "2020": ["2019", "2021"],
+        "2019": ["2018", "2020"],
+        "2018": ["2017", "2019"],
+    }
     for year, alts in _TEMPORAL_SUBS.items():
         if year in text:
             return text.replace(year, alts[0], 1)
-    # Then try keyword substitution
-    result, n = _TEMPORAL_KEYWORDS.subn(_STALE_SUBS[0], text, count=1)
-    if n == 0:
-        result = _STALE_SUBS[0] + " " + text
-    return result
+
+    # ── Tier 2: keyword substitution ────────────────────────────────────
+    _TEMPORAL_KEYWORDS_PATTERN = re.compile(
+        r"\b(current|now|today|latest|recent|still|anymore"
+        r"|as of \d{4}|january|february|march|april|may|june"
+        r"|july|august|september|october|november|december)\b",
+        re.IGNORECASE,
+    )
+
+    def _keyword_replacer(m: re.Match) -> str:
+        word = m.group(0).lower()
+        return _KEYWORD_REPLACEMENTS.get(word, "formerly")
+
+    result, n = _TEMPORAL_KEYWORDS_PATTERN.subn(_keyword_replacer, text, count=1)
+    if n > 0:
+        return result[0].upper() + result[1:] if result else result
+
+    # ── Tier 3: no temporal signal — emit nothing ────────────────────────
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -178,11 +199,42 @@ def _strategy_temporal_alt(claim_text: str, claim_obj) -> List[AdversarialHypoth
     if not getattr(claim_obj, "has_temporal", False):
         return []
     hyp = _apply_temporal_shift(claim_text)
+    if hyp is None:
+        # No year or temporal keyword found — do not emit a broken hypothesis
+        return []
     return [AdversarialHypothesis(
         text=hyp,
         strategy="temporal_alt",
         search_query="current status check: " + claim_text[:80],
     )]
+
+
+def _is_valid_entity(ent: str) -> bool:
+    """Return True only if ent looks like a meaningful named entity.
+
+    Rejects tokens that come from noisy OCR or scraped HTML, e.g.:
+        "Show More117T2 9697411 .+Pinned. people follow"
+        "9697411"
+        ".+Pinned"
+
+    Rules (all must pass):
+    - At least 2 characters long after stripping whitespace.
+    - At least 40% of characters are ASCII letters (filters pure-numeric
+      and symbol-heavy tokens).
+    - Does not contain regex/glob metacharacters (. + * ? [ ] { }).
+    - Does not start with a digit (rejects bare numbers like "9697411").
+    """
+    ent = ent.strip()
+    if len(ent) < 2:
+        return False
+    if ent[0].isdigit():
+        return False
+    alpha_ratio = sum(c.isalpha() for c in ent) / len(ent)
+    if alpha_ratio < 0.4:
+        return False
+    if re.search(r'[.+*?\[\]{}]', ent):
+        return False
+    return True
 
 
 def _strategy_entity_swap(claim_text: str, claim_obj) -> List[AdversarialHypothesis]:
@@ -191,7 +243,18 @@ def _strategy_entity_swap(claim_text: str, claim_obj) -> List[AdversarialHypothe
         return []
     hypotheses = []
     for ent in entities[:2]:
-        hyp = f'"{ent}": ' + claim_text
+        # Skip garbage tokens produced by NER on noisy OCR or scraped input.
+        if not _is_valid_entity(ent):
+            continue
+        # Generate a genuinely adversarial hypothesis by replacing the entity
+        # with "someone/something other than <entity>".  The old format
+        # f'"{ent}": ' + claim_text was semantically near-identical to the
+        # original claim, so NLI scored it with HIGH entailment → inflated
+        # best_alt_support → adv_score artificially low → all claims REFUTED.
+        if ent in claim_text:
+            hyp = claim_text.replace(ent, f"someone other than {ent}", 1)
+        else:
+            hyp = f"The attribution of this claim to {ent} is incorrect."
         hypotheses.append(AdversarialHypothesis(
             text=hyp,
             strategy="entity_swap",
@@ -200,13 +263,81 @@ def _strategy_entity_swap(claim_text: str, claim_obj) -> List[AdversarialHypothe
     return hypotheses
 
 
+def _extract_source(claim_text: str) -> str:
+    """Extract the cited source name from a citation claim.
+
+    Handles forms like:
+        "According to WHO, ..."          → "WHO"
+        "According to a 2023 MIT study"  → "MIT"
+        "Published in Nature, ..."       → "Nature"
+        "Per the CDC report, ..."        → "CDC"
+    """
+    text = claim_text.strip()
+
+    triggers = [
+        r"according to\s+",
+        r"as (?:stated|reported|shown) (?:by|in)\s+",
+        r"cite?d? (?:by|in)\s+",
+        r"published (?:by|in)\s+",
+        r"per\s+(?:the\s+)?",
+        r"from\s+(?:the\s+)?",
+    ]
+
+    for trigger in triggers:
+        m = re.search(trigger, text, re.IGNORECASE)
+        if not m:
+            continue
+        after = text[m.end():].strip()
+        after = re.sub(r'^(a|an|the|this)\s+', '', after, flags=re.IGNORECASE)
+
+        # All-caps acronym: WHO, CDC, NASA
+        acronym = re.match(r'^([A-Z]{2,8})\b', after)
+        if acronym:
+            return acronym.group(1)
+
+        # Year + org: "2023 MIT study" → "MIT"
+        year_org = re.match(r'^\d{4}\s+([A-Z][A-Za-z]+)', after)
+        if year_org:
+            return year_org.group(1)
+
+        # Capitalised words: "New York Times", "Nature"
+        words = after.split()
+        source_words = []
+        for w in words[:4]:
+            clean = w.strip(".,;:()")
+            if clean and (clean[0].isupper() or clean.isupper()):
+                source_words.append(clean)
+            else:
+                break
+        if source_words:
+            return " ".join(source_words)
+
+    # Last resort: first all-caps acronym anywhere in claim
+    m = re.search(r'\b([A-Z]{2,8})\b', text)
+    if m:
+        return m.group(1)
+
+    return "the cited source"
+
+
 def _strategy_citation_check(claim_text: str, claim_obj) -> List[AdversarialHypothesis]:
+    """Challenge the SOURCE's existence, not the content of the claim.
+
+    Emits: "There is no credible evidence that WHO published or stated this."
+    NLI scores this LOW when evidence confirms the source is real → SUPPORTED.
+    NLI scores this HIGH when no evidence of the source exists → REFUTED.
+    """
     if not getattr(claim_obj, "is_citation", False):
         return []
+
+    source = _extract_source(claim_text)
+    hyp = f"There is no credible evidence that {source} published or stated this."
+    search_query = f'"{source}" source verification existence fact check'
+
     return [AdversarialHypothesis(
-        text=claim_text,
+        text=hyp,
         strategy="citation_check",
-        search_query="verify source existence: " + claim_text[:80],
+        search_query=search_query,
     )]
 
 

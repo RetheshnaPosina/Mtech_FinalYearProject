@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HallucinationGuard AMADA v6.0</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #222534;
+      --border: #2e3347;
+      --accent: #6c63ff;
+      --accent2: #a78bfa;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --blue: #3b82f6;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --radius: 10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; min-height: 100vh; overflow-y: auto; }
+
+    /* Header */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 700; color: var(--accent2); letter-spacing: 0.3px; }
+    header span { font-size: 0.75rem; color: var(--muted); }
+    #health-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#555; margin-right:6px; vertical-align:middle; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 4px; padding: 16px 28px 0; border-bottom: 1px solid var(--border); position: sticky; top: 53px; z-index: 99; background: var(--bg); }
+    .tab-btn {
+      padding: 8px 20px; border: none; background: transparent; color: var(--muted);
+      font-size: 0.88rem; cursor: pointer; border-bottom: 2px solid transparent;
+      transition: all .2s; border-radius: 6px 6px 0 0;
+    }
+    .tab-btn.active { color: var(--accent2); border-bottom-color: var(--accent); background: var(--surface); }
+    .tab-btn:hover:not(.active) { color: var(--text); }
+
+    /* Tab content */
+    .tab-content { display: none; padding: 28px; max-width: 900px; margin: 0 auto; }
+    .tab-content.active { display: block; }
+
+    /* Card */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; margin-bottom: 18px; }
+    .card h3 { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 14px; }
+
+    /* Form elements */
+    label { display: block; font-size: 0.83rem; color: var(--muted); margin-bottom: 6px; }
+    textarea, input[type=text] {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 7px; padding: 10px 13px;
+      font-size: 0.92rem; font-family: inherit; outline: none; resize: vertical;
+      transition: border-color .2s;
+    }
+    textarea:focus, input[type=text]:focus { border-color: var(--accent); }
+    textarea { min-height: 100px; }
+
+    /* Mode toggle */
+    .mode-toggle { display: flex; gap: 8px; margin-bottom: 14px; }
+    .mode-btn {
+      padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); font-size: 0.8rem; cursor: pointer; transition: all .2s;
+    }
+    .mode-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    /* Upload zone */
+    .upload-zone {
+      border: 2px dashed var(--border); border-radius: var(--radius);
+      padding: 32px; text-align: center; cursor: pointer; transition: all .2s;
+      background: var(--surface2); position: relative;
+    }
+    .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: #1e1b3a; }
+    .upload-zone p { color: var(--muted); font-size: 0.87rem; }
+    .upload-zone strong { color: var(--accent2); }
+    .upload-zone input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; }
+    #preview-img, #full-preview-img { max-height: 180px; border-radius: 8px; margin-top: 12px; display: none; }
+
+    /* Checkbox row */
+    .check-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 0.85rem; color: var(--muted); }
+    .check-row input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+    /* Submit button */
+    .btn-primary {
+      margin-top: 16px; width: 100%; padding: 11px; border: none;
+      background: var(--accent); color: #fff; border-radius: 8px;
+      font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: opacity .2s;
+    }
+    .btn-primary:hover { opacity: 0.88; }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* Spinner */
+    .spinner { display:none; text-align:center; padding: 28px; color: var(--muted); font-size:0.87rem; }
+    .spinner::before { content:''; display:block; width:32px; height:32px; border:3px solid var(--border);
+      border-top-color: var(--accent); border-radius:50%; animation: spin .8s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Results */
+    #result-text, #result-image, #result-full, #result-metrics { display: none; }
+
+    /* Verdict badge */
+    .verdict-banner {
+      border-radius: 8px; padding: 16px 20px; display: flex;
+      align-items: center; justify-content: space-between; margin-bottom: 16px;
+    }
+    .verdict-banner.SUPPORTED { background: #14532d33; border: 1px solid var(--green); }
+    .verdict-banner.REFUTED   { background: #7f1d1d33; border: 1px solid var(--red); }
+    .verdict-banner.NOT_ENOUGH_INFO { background: #78350f33; border: 1px solid var(--yellow); }
+    .verdict-label { font-size: 1.3rem; font-weight: 700; }
+    .verdict-label.SUPPORTED { color: var(--green); }
+    .verdict-label.REFUTED   { color: var(--red); }
+    .verdict-label.NOT_ENOUGH_INFO { color: var(--yellow); }
+    .policy-badge { font-size: 0.75rem; padding: 3px 10px; border-radius: 20px; font-weight: 600; }
+    .policy-badge.PUBLISH { background: #166534; color: #86efac; }
+    .policy-badge.FLAG    { background: #92400e; color: #fcd34d; }
+    .policy-badge.REJECT  { background: #7f1d1d; color: #fca5a5; }
+
+    /* Metrics grid */
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+    .metric-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+    .metric-box .val { font-size: 1.5rem; font-weight: 700; color: var(--accent2); }
+    .metric-box .lbl { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+
+    /* Trust bar */
+    .trust-bar-wrap { margin: 10px 0; }
+    .trust-bar-wrap label { font-size: 0.8rem; color: var(--muted); display: flex; justify-content: space-between; }
+    .trust-bar { height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; margin-top: 5px; }
+    .trust-bar-fill { height: 100%; border-radius: 4px; transition: width .6s; }
+
+    /* Claim card */
+    .claim-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+    .claim-item .claim-text { font-size: 0.9rem; color: var(--text); margin-bottom: 8px; }
+    .claim-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 0.78rem; color: var(--muted); }
+    .tag { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; }
+    .tag.red { border-color: var(--red); color: var(--red); }
+    .tag.green { border-color: var(--green); color: var(--green); }
+    .tag.yellow { border-color: var(--yellow); color: var(--yellow); }
+
+    /* Evidence snippets */
+    .evidence-list { list-style: none; }
+    .evidence-list li { font-size: 0.8rem; color: var(--muted); padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .evidence-list li:last-child { border-bottom: none; }
+
+    /* Suspicion flag */
+    .suspicion { font-size: 0.78rem; padding: 4px 10px; border-radius: 4px; display: inline-block; margin-top: 4px; }
+    .suspicion.HIGH_SUSPICION_EASY_FACT_FAILED { background: #7f1d1d55; color: #fca5a5; }
+    .suspicion.TEMPORAL_STALENESS { background: #78350f55; color: #fcd34d; }
+    .suspicion.ENTITY_CONFUSION   { background: #1e3a5f55; color: #93c5fd; }
+    .suspicion.NUMERIC_DISCREPANCY { background: #4c1d9555; color: #c4b5fd; }
+    .suspicion.NONE { display: none; }
+
+    /* Error */
+    .error-box { background: #7f1d1d33; border: 1px solid var(--red); border-radius: 8px; padding: 14px; color: #fca5a5; font-size: 0.87rem; }
+
+    /* Metrics tab */
+    .refresh-btn { float:right; padding: 5px 14px; background: var(--surface2); border: 1px solid var(--border); color: var(--muted); border-radius: 6px; cursor:pointer; font-size:0.8rem; }
+    .refresh-btn:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>&#x1F6E1; HallucinationGuard <span style="color:var(--muted);font-weight:400">AMADA v6.0</span></h1>
+  <span><span id="health-dot"></span><span id="health-txt">checking...</span></span>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('text', this)">&#x1F4DD; Text</button>
+  <button class="tab-btn" onclick="switchTab('image', this)">&#x1F5BC; Image</button>
+  <button class="tab-btn" onclick="switchTab('full', this)">&#x1F50D; Full (Text + Image)</button>
+  <button class="tab-btn" onclick="switchTab('metrics', this)">&#x1F4CA; Metrics</button>
+</div>
+
+<!-- ===================== TEXT TAB ===================== -->
+<div id="tab-text" class="tab-content active">
+  <div class="card">
+    <h3>Text Verification</h3>
+    <label>Paste text or claim to verify</label>
+    <textarea id="txt-input" placeholder="e.g. Netanyahu died in an Iranian airstrike." rows="5"></textarea>
+    <div class="check-row">
+      <input type="checkbox" id="txt-api-judge" />
+      <label style="margin:0">Use API Judge (Claude/Gemini) for ambiguous cases</label>
+    </div>
+    <button class="btn-primary" onclick="verifyText()">Verify Text</button>
+  </div>
+  <div class="spinner" id="spin-text">Analysing claims with AMADA agents...</div>
+  <div id="result-text"></div>
+</div>
+
+<!-- ===================== IMAGE TAB ===================== -->
+<div id="tab-image" class="tab-content">
+  <div class="card">
+    <h3>Image Verification</h3>
+    <div class="mode-toggle">
+      <button class="mode-btn active" id="img-mode-upload-btn" onclick="setMode('upload')">Upload File</button>
+      <button class="mode-btn" id="img-mode-path-btn" onclick="setMode('path')">File Path</button>
+    </div>
+
+    <!-- Upload mode -->
+    <div id="upload-mode">
+      <div class="upload-zone" id="drop-zone"
+           ondragover="event.preventDefault();this.classList.add('drag')"
+           ondragleave="this.classList.remove('drag')"
+           ondrop="handleDrop(event)">
+        <input type="file" id="img-file-input" accept="image/*,.jfif,.jfif-tbnl,.jpe,.tif,.tiff,.bmp,.heic,.heif,.avif,.svg,.ico,.raw,.cr2,.nef,.dng" onchange="previewFile(this)" />
+        <p>&#x1F4C2; <strong>Click to browse</strong> or drag &amp; drop</p>
+        <p style="font-size:0.75rem;margin-top:4px">JPG, JPEG, JFIF, PNG, WEBP, BMP, TIFF, HEIC, AVIF, GIF &amp; more</p>
+        <img id="preview-img" alt="preview" />
+      </div>
+    </div>
+
+    <!-- Path mode -->
+    <div id="path-mode" style="display:none">
+      <label>Absolute image path</label>
+      <input type="text" id="img-path-input" placeholder="C:\Users\...\image.jpg" />
+    </div>
+
+    <label style="margin-top:14px">Caption / claim about the image (optional)</label>
+    <input type="text" id="img-caption" placeholder="e.g. Netanyahu speaking at a press conference" />
+
+    <div class="check-row">
+      <input type="checkbox" id="img-api-judge" />
+      <label style="margin:0">Use API Judge</label>
+    </div>
+    <button class="btn-primary" onclick="verifyImage()">Verify Image</button>
+  </div>
+  <div class="spinner" id="spin-image">Running image forensics pipeline...</div>
+  <div id="result-image"></div>
+</div>
+
+<!-- ===================== FULL TAB ===================== -->
+<div id="tab-full" class="tab-content">
+  <div class="card">
+    <h3>Full Multimodal Verification (Text + Image)</h3>
+    <label>Text / claim</label>
+    <textarea id="full-text-input" placeholder="Enter the claim or caption associated with this image..." rows="3"></textarea>
+
+    <label style="margin-top:14px">Image</label>
+    <div class="mode-toggle">
+      <button class="mode-btn active" id="full-mode-upload-btn" onclick="setFullMode('upload')">Upload File</button>
+      <button class="mode-btn" id="full-mode-path-btn" onclick="setFullMode('path')">File Path</button>
+    </div>
+
+    <div id="full-upload-mode">
+      <div class="upload-zone" id="full-drop-zone"
+           ondragover="event.preventDefault();this.classList.add('drag')"
+           ondragleave="this.classList.remove('drag')"
+           ondrop="handleFullDrop(event)">
+        <input type="file" id="full-file-input" accept="image/*,.jfif,.jfif-tbnl,.jpe,.tif,.tiff,.bmp,.heic,.heif,.avif,.svg,.ico,.raw,.cr2,.nef,.dng" onchange="previewFullFile(this)" />
+        <p>&#x1F4C2; <strong>Click to browse</strong> or drag &amp; drop</p>
+        <img id="full-preview-img" alt="preview" />
+      </div>
+    </div>
+
+    <div id="full-path-mode" style="display:none">
+      <label>Absolute image path</label>
+      <input type="text" id="full-path-input" placeholder="C:\Users\...\image.jpg" />
+    </div>
+
+    <div class="check-row">
+      <input type="checkbox" id="full-api-judge" />
+      <label style="margin:0">Use API Judge</label>
+    </div>
+    <button class="btn-primary" onclick="verifyFull()">Run Full Verification</button>
+  </div>
+  <div class="spinner" id="spin-full">Running AMADA full pipeline (text + image + cross-modal)...</div>
+  <div id="result-full"></div>
+</div>
+
+<!-- ===================== METRICS TAB ===================== -->
+<div id="tab-metrics" class="tab-content">
+  <div class="card">
+    <h3>System Metrics <button class="refresh-btn" onclick="loadMetrics()">&#x21BB; Refresh</button></h3>
+    <div class="spinner" id="spin-metrics"></div>
+    <div id="result-metrics"></div>
+  </div>
+</div>
+
+<script>
+const BASE = 'http://127.0.0.1:8000';
+
+// ─── Health check ───────────────────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const r = await fetch(`${BASE}/api/v1/health`);
+    const d = await r.json();
+    document.getElementById('health-dot').style.background = d.status === 'ok' ? '#22c55e' : '#ef4444';
+    document.getElementById('health-txt').textContent = d.status === 'ok' ? `AMADA v${d.version} — online` : 'degraded';
+  } catch {
+    document.getElementById('health-dot').style.background = '#ef4444';
+    document.getElementById('health-txt').textContent = 'offline';
+  }
+}
+checkHealth();
+setInterval(checkHealth, 30000);
+
+// ─── Tab switching ───────────────────────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'metrics') loadMetrics();
+}
+
+// ─── Image mode toggles ──────────────────────────────────────────────────────
+let _imageMode = 'upload';
+let _fullImageMode = 'upload';
+let _selectedFile = null;
+let _fullSelectedFile = null;
+
+function setMode(m) {
+  _imageMode = m;
+  document.getElementById('upload-mode').style.display = m === 'upload' ? '' : 'none';
+  document.getElementById('path-mode').style.display   = m === 'path'   ? '' : 'none';
+  document.getElementById('img-mode-upload-btn').className = 'mode-btn' + (m === 'upload' ? ' active' : '');
+  document.getElementById('img-mode-path-btn').className   = 'mode-btn' + (m === 'path'   ? ' active' : '');
+}
+function setFullMode(m) {
+  _fullImageMode = m;
+  document.getElementById('full-upload-mode').style.display = m === 'upload' ? '' : 'none';
+  document.getElementById('full-path-mode').style.display   = m === 'path'   ? '' : 'none';
+  document.getElementById('full-mode-upload-btn').className = 'mode-btn' + (m === 'upload' ? ' active' : '');
+  document.getElementById('full-mode-path-btn').className   = 'mode-btn' + (m === 'path'   ? ' active' : '');
+}
+
+function previewFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  _selectedFile = file;
+  const img = document.getElementById('preview-img');
+  img.src = URL.createObjectURL(file);
+  img.style.display = 'block';
+  document.querySelector('#drop-zone p').textContent = file.name;
+}
+function previewFullFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  _fullSelectedFile = file;
+  const img = document.getElementById('full-preview-img');
+  img.src = URL.createObjectURL(file);
+  img.style.display = 'block';
+  document.querySelector('#full-drop-zone p').textContent = file.name;
+}
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) { const dt = new DataTransfer(); dt.items.add(file); document.getElementById('img-file-input').files = dt.files; previewFile(document.getElementById('img-file-input')); }
+}
+function handleFullDrop(e) {
+  e.preventDefault();
+  document.getElementById('full-drop-zone').classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) { const dt = new DataTransfer(); dt.items.add(file); document.getElementById('full-file-input').files = dt.files; previewFullFile(document.getElementById('full-file-input')); }
+}
+
+// ─── Render helpers ──────────────────────────────────────────────────────────
+function verdictColor(v) {
+  return v === 'SUPPORTED' ? 'var(--green)' : v === 'REFUTED' ? 'var(--red)' : 'var(--yellow)';
+}
+function barColor(v) {
+  if (v > 0.7) return 'var(--green)';
+  if (v > 0.4) return 'var(--yellow)';
+  return 'var(--red)';
+}
+function pct(v) { return (v * 100).toFixed(1) + '%'; }
+
+function renderClaims(claims) {
+  if (!claims || claims.length === 0) return '<p style="color:var(--muted);font-size:0.85rem">No claims extracted.</p>';
+  return claims.map((c, idx) => {
+    const pConf  = ((c.prosecutor_confidence ?? 0) * 100).toFixed(1);
+    const dConf  = ((c.defender_confidence  ?? 0) * 100).toFixed(1);
+    const advScore   = ((c.adversarial_score  ?? 0) * 100).toFixed(1);
+    const nliEnt     = ((c.nli_entailment    ?? 0) * 100).toFixed(1);
+    const nliCon     = ((c.nli_contradiction ?? 0) * 100).toFixed(1);
+    const difficulty = ((c.difficulty_score  ?? 0) * 100).toFixed(1);
+    const vcLabel = c.verdict === 'SUPPORTED' ? 'green' : c.verdict === 'REFUTED' ? 'red' : 'yellow';
+    const gapNum = Math.abs((c.prosecutor_confidence ?? 0) - (c.defender_confidence ?? 0));
+    const gap    = (gapNum * 100).toFixed(1);
+    const gapColor = gapNum > 0.15 ? 'var(--red)' : gapNum > 0.05 ? 'var(--yellow)' : 'var(--green)';
+    return `
+    <div class="claim-item">
+      <!-- Claim header -->
+      <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
+        <div style="font-size:0.75rem;color:var(--muted);min-width:22px;margin-top:2px">C${idx+1}</div>
+        <div class="claim-text" style="font-weight:600;font-size:0.94rem;flex:1">"${escHtml(c.claim)}"</div>
+      </div>
+
+      <!-- Verdict + policy tags -->
+      <div class="claim-row" style="margin-bottom:10px">
+        <span class="tag ${vcLabel}" style="font-weight:700;font-size:0.82rem">${c.verdict}</span>
+        <span class="tag" style="border-color:var(--accent2);color:var(--accent2)">Calibrated Trust: <strong>${pct(c.calibrated_trust)}</strong></span>
+        <span class="tag">Raw Trust: ${pct(c.raw_trust)}</span>
+        <span class="tag">Difficulty: ${difficulty}%</span>
+        <span class="tag">Rounds: ${c.debate_rounds}</span>
+        ${c.api_judge_used ? '<span class="tag" style="border-color:var(--blue);color:var(--blue)">&#x2605; API Judge</span>' : '<span class="tag" style="border-color:var(--muted)">Local Judge</span>'}
+      </div>
+
+      <!-- Full score grid -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:12px">
+        <div class="metric-box" title="Prosecutor tries to REFUTE the claim">
+          <div class="val" style="font-size:1.1rem;color:var(--red)">${pConf}%</div>
+          <div class="lbl">&#x2694; Prosecutor</div>
+        </div>
+        <div class="metric-box" title="Defender tries to SUPPORT the claim">
+          <div class="val" style="font-size:1.1rem;color:var(--green)">${dConf}%</div>
+          <div class="lbl">&#x1F6E1; Defender</div>
+        </div>
+        <div class="metric-box" title="Confidence gap — gap > 15% triggers Round 2 debate + API Judge">
+          <div class="val" style="font-size:1.1rem;color:${gapColor}">${gap}%</div>
+          <div class="lbl">&#x21C5; Agent Gap</div>
+        </div>
+        <div class="metric-box" title="AWP adversarial perturbation score — how easily an adversary could flip this verdict">
+          <div class="val" style="font-size:1.1rem;color:var(--yellow)">${advScore}%</div>
+          <div class="lbl">&#x26A1; AWP Adv.</div>
+        </div>
+        <div class="metric-box" title="NLI average entailment across top evidence">
+          <div class="val" style="font-size:1.1rem;color:var(--green)">${nliEnt}%</div>
+          <div class="lbl">&#x2713; NLI Entail</div>
+        </div>
+        <div class="metric-box" title="NLI contradiction signal across top evidence">
+          <div class="val" style="font-size:1.1rem;color:var(--red)">${nliCon}%</div>
+          <div class="lbl">&#x2717; NLI Contra</div>
+        </div>
+      </div>
+
+      <!-- Trust bar -->
+      <div class="trust-bar-wrap" style="margin-bottom:10px">
+        <label><span style="color:var(--accent2)">VCADE Calibrated Trust</span><span>${pct(c.calibrated_trust)}</span></label>
+        <div class="trust-bar" style="height:10px"><div class="trust-bar-fill" style="width:${pct(c.calibrated_trust)};background:${barColor(c.calibrated_trust)}"></div></div>
+      </div>
+
+      ${c.suspicion_flag && c.suspicion_flag !== 'NONE' ? `<div style="margin-bottom:8px"><span class="suspicion ${c.suspicion_flag}">&#x26D4; ${c.suspicion_flag.replace(/_/g,' ')}</span></div>` : ''}
+
+      ${c.judge_reasoning ? `
+        <div style="margin-bottom:8px;padding:10px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+          <div style="font-size:0.73rem;color:var(--accent2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">&#x2696; Judge Reasoning</div>
+          <div style="font-size:0.84rem;color:var(--text);line-height:1.5">${escHtml(c.judge_reasoning)}</div>
+        </div>` : ''}
+
+      ${c.best_alt_hypothesis ? `
+        <div style="margin-bottom:6px;font-size:0.82rem;color:var(--muted);padding:7px 10px;background:var(--bg);border-radius:5px;border-left:3px solid var(--accent2)">
+          <span style="color:var(--accent2)">&#x1F50D; Best Alt. Hypothesis:</span> ${escHtml(c.best_alt_hypothesis)}
+        </div>` : ''}
+
+      ${c.correction_suggestion ? `
+        <div style="margin-bottom:6px;font-size:0.82rem;color:var(--yellow);padding:7px 10px;background:#78350f22;border-radius:5px;border-left:3px solid var(--yellow)">
+          &#x26A0; <strong>Correction:</strong> ${escHtml(c.correction_suggestion)}
+        </div>` : ''}
+
+      ${c.evidence_snippets && c.evidence_snippets.length ? `
+        <div style="margin-top:8px">
+          <div style="font-size:0.75rem;color:var(--accent2);margin-bottom:6px">&#x1F4DA; Evidence Used (${c.evidence_snippets.length} sources)</div>
+          <ul class="evidence-list">${c.evidence_snippets.map((e,i) => `<li><span style="color:var(--accent2);font-size:0.75rem">[${i+1}]</span> ${escHtml(e.slice(0,300))}${e.length>300?'…':''}</li>`).join('')}</ul>
+        </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderOverall(d) {
+  const trust = d.overall_trust ?? 0;
+  const policy = d.policy ?? 'FLAG';
+  const vcClass = policy === 'PUBLISH' ? 'SUPPORTED' : policy === 'REJECT' ? 'REFUTED' : 'NOT_ENOUGH_INFO';
+  const policyIcon = policy === 'PUBLISH' ? '&#x2705;' : policy === 'REJECT' ? '&#x274C;' : '&#x26A0;';
+  const latSec = ((d.latency_ms ?? 0) / 1000).toFixed(2);
+  return `
+    <div class="verdict-banner ${vcClass}" style="flex-wrap:wrap;gap:12px">
+      <div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">AMADA Overall Trust Score</div>
+        <div class="verdict-label ${vcClass}" style="font-size:2rem">${pct(trust)}</div>
+      </div>
+      <div style="text-align:right;flex:1;min-width:160px">
+        <div style="font-size:1.1rem;font-weight:700">${policyIcon} <span class="policy-badge ${policy}" style="font-size:0.9rem;padding:5px 14px">${policy}</span></div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:8px">Tier ${d.tier_used ?? '?'} &nbsp;·&nbsp; ${(d.latency_ms ?? 0).toFixed(0)}ms (${latSec}s) &nbsp;·&nbsp; ${d.api_calls_made ?? 0} API call(s)</div>
+      </div>
+    </div>
+
+    <div class="trust-bar-wrap" style="margin-top:14px">
+      <label><span>Calibrated Trust</span><span>${pct(trust)}</span></label>
+      <div class="trust-bar" style="height:12px"><div class="trust-bar-fill" style="width:${pct(trust)};background:${barColor(trust)}"></div></div>
+    </div>
+
+    ${(d.fact_score || d.awp_fact_score || d.adversarial_detection_rate) ? `
+    <div class="metrics-grid" style="margin-top:14px">
+      <div class="metric-box">
+        <div class="val" style="font-size:1.2rem">${pct(d.fact_score ?? 0)}</div>
+        <div class="lbl">Fact Score</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="font-size:1.2rem">${pct(d.awp_fact_score ?? 0)}</div>
+        <div class="lbl">AWP Fact Score</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="font-size:1.2rem">${pct(d.adversarial_detection_rate ?? 0)}</div>
+        <div class="lbl">Adversarial Detection</div>
+      </div>
+      <div class="metric-box">
+        <div class="val" style="font-size:1.2rem">${(d.claims||[]).length}</div>
+        <div class="lbl">Claims Analysed</div>
+      </div>
+    </div>` : ''}`;
+}
+
+function renderImageStats(d) {
+  const hasImageData = d.image_path || d.image_fusion_score > 0 || d.image_verdict || d.image_description || d.detailed_caption || (d.objects_detected && d.objects_detected.length);
+  if (!hasImageData) return '';
+
+  const forensicsItems = [
+    ['&#x1F9EA; Image Fusion Score', pct(d.image_fusion_score), 'Composite authenticity score from ELA+FFT+CNN'],
+    ['&#x1F916; CNN Deepfake Prob', pct(d.cnn_probability), 'Neural network deepfake probability'],
+    ['&#x26A1; ELA Energy', pct(d.ela_energy), 'Error Level Analysis — compression anomalies'],
+    ['&#x1F4CA; FFT Score', pct(d.fft_score), 'Frequency domain artifact score'],
+    ['&#x1F517; CLIP Similarity', pct(d.clip_similarity), 'Image-text semantic alignment'],
+    ['&#x1F91D; Cross-Modal Trust', pct(d.cross_modal_trust), 'Text vs image consistency'],
+    ['&#x1F4AF; Context Trust', pct(d.context_trust), 'Out-of-context detection score'],
+    ['&#x1F47B; Deepfake Probability', pct(d.deepfake_probability), 'Face manipulation detection'],
+  ];
+
+  return `
+    <div class="card">
+      <h3>&#x1F50D; Image Forensics Pipeline</h3>
+
+      ${d.image_verdict ? `
+        <div style="margin-bottom:14px;padding:10px 14px;background:var(--bg);border-radius:7px;border-left:3px solid var(--accent)">
+          <span style="font-size:0.75rem;color:var(--muted)">Image Verdict: </span>
+          <strong style="color:var(--text)">${escHtml(d.image_verdict)}</strong>
+        </div>` : ''}
+
+      <div class="metrics-grid">
+        ${forensicsItems.map(([l,v,tip]) => `
+          <div class="metric-box" title="${tip}">
+            <div class="val" style="font-size:1.1rem">${v}</div>
+            <div class="lbl">${l}</div>
+          </div>`).join('')}
+      </div>
+
+      ${d.has_periodic_artifacts ? '<div style="margin-top:10px;font-size:0.82rem;color:var(--red);padding:6px 10px;background:#7f1d1d22;border-radius:5px">&#x26A0; Periodic artifacts detected — possible AI/GAN generation</div>' : ''}
+      ${d.watermark_type ? `<div style="margin-top:6px;font-size:0.82rem;color:var(--yellow);padding:6px 10px;background:#78350f22;border-radius:5px">&#x26A0; Watermark detected: <strong>${escHtml(d.watermark_type)}</strong></div>` : ''}
+      ${d.contradictions_found ? `<div style="margin-top:6px;font-size:0.82rem;color:var(--red);padding:6px 10px;background:#7f1d1d22;border-radius:5px">&#x274C; Text-image contradiction detected — severity: <strong>${pct(d.contradiction_severity)}</strong></div>` : ''}
+      ${d.faces_found ? `<div style="margin-top:6px;font-size:0.82rem;color:var(--blue);padding:6px 10px;background:#1e3a5f22;border-radius:5px">&#x1F464; Face(s) detected — deepfake probability: <strong>${pct(d.deepfake_probability)}</strong></div>` : ''}
+
+      ${d.detailed_caption || d.image_description ? `
+        <div style="margin-top:14px;padding:10px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+          <div style="font-size:0.73rem;color:var(--accent2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">&#x1F4DD; AI Image Description</div>
+          <div style="font-size:0.85rem;color:var(--text)">${escHtml(d.detailed_caption || d.image_description)}</div>
+        </div>` : ''}
+
+      ${d.objects_detected && d.objects_detected.length ? `
+        <div style="margin-top:10px">
+          <div style="font-size:0.75rem;color:var(--muted);margin-bottom:6px">&#x1F3AF; Objects Detected (${d.objects_detected.length})</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">${d.objects_detected.map(o => `<span class="tag">${escHtml(o)}</span>`).join('')}</div>
+        </div>` : ''}
+
+      ${d.ocr_text ? `
+        <div style="margin-top:10px;padding:8px 10px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+          <div style="font-size:0.73rem;color:var(--muted);margin-bottom:4px">&#x1F4C4; OCR Text Extracted</div>
+          <div style="font-size:0.82rem;color:var(--text);font-family:monospace">${escHtml(d.ocr_text)}</div>
+        </div>` : ''}
+
+      ${d.mismatched_entities && d.mismatched_entities.length ? `
+        <div style="margin-top:10px">
+          <div style="font-size:0.75rem;color:var(--red);margin-bottom:6px">&#x274C; Mismatched Entities</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">${d.mismatched_entities.map(e => `<span class="tag red">${escHtml(e)}</span>`).join('')}</div>
+        </div>` : ''}
+    </div>`;
+}
+
+function renderFlags(flags) {
+  if (!flags || flags.length === 0) return '';
+  return `
+    <div class="card" style="border-color:var(--red)">
+      <h3 style="color:var(--red)">&#x26D4; Suspicion Flags (${flags.length})</h3>
+      ${flags.map(f => `
+        <div style="font-size:0.84rem;color:var(--red);margin-bottom:6px;padding:6px 10px;background:#7f1d1d22;border-radius:5px">
+          &#x26D4; ${escHtml(f)}
+        </div>`).join('')}
+    </div>`;
+}
+
+function renderPipelineSummary(d) {
+  const steps = [];
+  steps.push({icon:'&#x1F6E1;', label:'Sentinel Validation', status:'ok', detail:`Tier ${d.tier_used} assigned`});
+  if (d.claims && d.claims.length) steps.push({icon:'&#x2696;', label:'AMADA Debate (AWP)', status:'ok', detail:`${d.claims.length} claim(s) · ${d.claims[0]?.debate_rounds ?? 1} round(s)`});
+  if (d.image_fusion_score > 0 || d.image_verdict) steps.push({icon:'&#x1F50D;', label:'Forensics Pipeline (ELA+FFT+CNN)', status:'ok', detail:`Fusion: ${pct(d.image_fusion_score)}`});
+  if (d.clip_similarity > 0) steps.push({icon:'&#x1F91D;', label:'CMCD Cross-Modal', status:'ok', detail:`CLIP: ${pct(d.clip_similarity)}`});
+  if (d.api_calls_made > 0) steps.push({icon:'&#x2605;', label:'API Judge (Claude/Gemini)', status:'ok', detail:`${d.api_calls_made} call(s)`});
+
+  return `
+    <div class="card" style="margin-bottom:18px">
+      <h3>&#x1F9EC; AMADA Pipeline Execution</h3>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+        ${steps.map((s,i) => `
+          <div style="display:flex;align-items:center;gap:10px;font-size:0.84rem">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:0.7rem;flex-shrink:0">&#x2713;</div>
+            <span>${s.icon} <strong>${s.label}</strong></span>
+            <span style="color:var(--muted);font-size:0.78rem;margin-left:auto">${s.detail}</span>
+          </div>
+          ${i < steps.length-1 ? '<div style="width:2px;height:10px;background:var(--border);margin-left:10px"></div>' : ''}`).join('')}
+      </div>
+    </div>`;
+}
+
+function renderError(msg) {
+  return `<div class="error-box">&#x274C; ${escHtml(msg)}</div>`;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Text verification ───────────────────────────────────────────────────────
+async function verifyText() {
+  const text = document.getElementById('txt-input').value.trim();
+  if (!text) return alert('Please enter text to verify.');
+  const useApi = document.getElementById('txt-api-judge').checked;
+  const spin = document.getElementById('spin-text');
+  const out  = document.getElementById('result-text');
+  spin.style.display = 'block'; out.style.display = 'none';
+  try {
+    const res = await fetch(`${BASE}/api/v1/verify/text`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({text, use_api_judge: useApi})
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || res.statusText);
+    out.innerHTML = renderOverall(d) + renderPipelineSummary(d) + renderFlags(d.active_suspicion_flags) +
+      `<div class="card"><h3>&#x2696; Claims Analysis (${(d.claims||[]).length})</h3>${renderClaims(d.claims)}</div>`;
+    out.style.display = 'block';
+  } catch(e) {
+    out.innerHTML = renderError(e.message); out.style.display = 'block';
+  }
+  spin.style.display = 'none';
+}
+
+// ─── Image verification ──────────────────────────────────────────────────────
+async function verifyImage() {
+  const useApi  = document.getElementById('img-api-judge').checked;
+  const caption = document.getElementById('img-caption').value.trim();
+  const spin = document.getElementById('spin-image');
+  const out  = document.getElementById('result-image');
+  spin.style.display = 'block'; out.style.display = 'none';
+  try {
+    let res;
+    if (_imageMode === 'upload') {
+      if (!_selectedFile) throw new Error('Please select an image file.');
+      const fd = new FormData();
+      fd.append('file', _selectedFile);
+      if (caption) fd.append('caption', caption);
+      fd.append('use_api_judge', useApi);
+      res = await fetch(`${BASE}/api/v1/verify/image/upload`, {method:'POST', body: fd});
+    } else {
+      const path = document.getElementById('img-path-input').value.trim();
+      if (!path) throw new Error('Please enter an image path.');
+      res = await fetch(`${BASE}/api/v1/verify/image`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({image_path: path, caption, use_api_judge: useApi})
+      });
+    }
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || res.statusText);
+    out.innerHTML = renderOverall(d) + renderPipelineSummary(d) + renderImageStats(d) + renderFlags(d.active_suspicion_flags) +
+      (d.claims && d.claims.length ? `<div class="card"><h3>&#x2696; Extracted Claims</h3>${renderClaims(d.claims)}</div>` : '');
+    out.style.display = 'block';
+  } catch(e) {
+    out.innerHTML = renderError(e.message); out.style.display = 'block';
+  }
+  spin.style.display = 'none';
+}
+
+// ─── Full verification ───────────────────────────────────────────────────────
+async function verifyFull() {
+  const text   = document.getElementById('full-text-input').value.trim();
+  const useApi = document.getElementById('full-api-judge').checked;
+  const spin = document.getElementById('spin-full');
+  const out  = document.getElementById('result-full');
+  spin.style.display = 'block'; out.style.display = 'none';
+  try {
+    let res;
+    if (_fullImageMode === 'upload') {
+      if (!_fullSelectedFile) throw new Error('Please select an image file.');
+      if (!text) throw new Error('Please enter a text claim.');
+      const fd = new FormData();
+      fd.append('file', _fullSelectedFile);
+      fd.append('text', text);
+      fd.append('use_api_judge', useApi);
+      res = await fetch(`${BASE}/api/v1/verify/full/upload`, {method:'POST', body: fd});
+    } else {
+      const path = document.getElementById('full-path-input').value.trim();
+      if (!path && !text) throw new Error('Please provide at least text or an image path.');
+      res = await fetch(`${BASE}/api/v1/verify/full`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({text, image_path: path || undefined, use_api_judge: useApi})
+      });
+    }
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || res.statusText);
+    out.innerHTML = renderOverall(d) + renderPipelineSummary(d) + renderImageStats(d) + renderFlags(d.active_suspicion_flags) +
+      (d.claims && d.claims.length ? `<div class="card"><h3>&#x2696; Claims Analysis (${d.claims.length})</h3>${renderClaims(d.claims)}</div>` : '');
+    out.style.display = 'block';
+  } catch(e) {
+    out.innerHTML = renderError(e.message); out.style.display = 'block';
+  }
+  spin.style.display = 'none';
+}
+
+// ─── Metrics ─────────────────────────────────────────────────────────────────
+async function loadMetrics() {
+  const spin = document.getElementById('spin-metrics');
+  const out  = document.getElementById('result-metrics');
+  spin.style.display = 'block'; out.style.display = 'none';
+  try {
+    const res = await fetch(`${BASE}/api/v1/metrics`);
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || res.statusText);
+    const items = [
+      ['Total Requests', d.total_requests ?? 0],
+      ['Avg Trust', d.avg_overall_trust != null ? pct(d.avg_overall_trust) : 'N/A'],
+      ['Avg AWP Score', d.avg_awp_fact_score != null ? pct(d.avg_awp_fact_score) : 'N/A'],
+      ['Adversarial Detection', d.adversarial_detection_rate != null ? pct(d.adversarial_detection_rate) : 'N/A'],
+      ['P50 Latency', d.latency_p50_ms != null ? d.latency_p50_ms.toFixed(0)+'ms' : 'N/A'],
+      ['P95 Latency', d.latency_p95_ms != null ? d.latency_p95_ms.toFixed(0)+'ms' : 'N/A'],
+    ];
+    out.innerHTML = `<div class="metrics-grid">${items.map(([l,v]) =>
+      `<div class="metric-box"><div class="val">${v}</div><div class="lbl">${l}</div></div>`).join('')}</div>`;
+    out.style.display = 'block';
+  } catch(e) {
+    out.innerHTML = renderError(e.message); out.style.display = 'block';
+  }
+  spin.style.display = 'none';
+}
+</script>
+</body>
+</html>

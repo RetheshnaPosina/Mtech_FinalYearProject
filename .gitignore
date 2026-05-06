@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Environment variables (sensitive!)
+.env
+.env.local
+.env.*.local
+
+# Model cache (large binary files — HuggingFace auto-downloads on first run)
+model_cache/*
+# Exception: custom trained CNN model (tracked via Git LFS)
+!model_cache/my_model.h5
+
+# Logs
+*.log
+server.log
+
+# Audit logs — track the JSONL file, ignore any raw .log files inside
+!audit_logs/
+!audit_logs/*.jsonl
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/

@@ -89,12 +89,24 @@ class ProsecutorAgent(BaseAgent):
         adv_score: float = awp["adversarial_score"]
         best_alt_support: float = awp["best_alt_support"]
         best_alt_text: str = awp.get("best_alt_text", "")
+        avg_contradiction: float = awp.get("avg_contradiction", 0.0)
+        relevant_support: int = awp.get("relevant_support_count", 0)
 
-        # Verdict: low AWP → evidence of refutation
-        if adv_score < 0.35:
+        # Verdict decision.
+        # Fix (2026-05-30): a low AWP score caused by the ABSENCE of supporting
+        # evidence is NOT refutation — it is NOT_ENOUGH_INFO.  Genuine refutation
+        # requires evidence that actually contradicts the claim.  Previously any
+        # claim with no on-topic supporting evidence (original_support ~ 0) plus a
+        # spuriously high adversarial hypothesis was driven to REFUTED, which
+        # flagged evident truths.  We now gate REFUTED on real contradiction.
+        if relevant_support == 0:
+            # No evidence addresses the claim — cannot support or refute it.
+            verdict = Verdict.NOT_ENOUGH_INFO
+            confidence = 0.4
+        elif adv_score < settings.awp_refuted_threshold and avg_contradiction >= 0.20:
             verdict = Verdict.REFUTED
             confidence = 1.0 - adv_score
-        elif adv_score > 0.72:
+        elif adv_score > settings.awp_supported_threshold:
             verdict = Verdict.SUPPORTED
             confidence = adv_score
         else:

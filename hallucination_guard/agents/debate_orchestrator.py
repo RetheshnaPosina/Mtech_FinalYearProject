@@ -156,13 +156,19 @@ async def debate_claim(
     # Best adversarial hypothesis for correction suggestion
     best_alt_hypothesis = latest_prosecutor.adversarial_hypotheses[0] \
         if latest_prosecutor.adversarial_hypotheses else ""
-    # "someone other than X" is an internal NLI trick — don't expose it raw to users
-    if best_alt_hypothesis and "someone other than" in best_alt_hypothesis:
-        correction_suggestion = f"Verify the identity/attribution in this claim against a trusted source."
-    elif best_alt_hypothesis:
-        correction_suggestion = f"Consider: {best_alt_hypothesis}"
-    else:
+    # A correction only makes sense when the claim is NOT supported — showing an
+    # adversarial alternative as a "correction" on a true claim is misleading.
+    if verdict == Verdict.SUPPORTED or not best_alt_hypothesis:
         correction_suggestion = ""
+    else:
+        # Don't surface raw adversarial hypotheses to users.  They are internal
+        # NLI probes (concrete entity swaps, negations, attribution challenges)
+        # and read as nonsensical "corrections" — e.g. "Consider: Yair Lapid
+        # died in a war".  A generic, honest hint is clearer for a flagged claim.
+        correction_suggestion = (
+            "The retrieved evidence did not support this claim — "
+            "verify it against a trusted, up-to-date source."
+        )
 
     nli_entailment = (
         sum(e.relevance for e in top_evidence) / len(top_evidence)

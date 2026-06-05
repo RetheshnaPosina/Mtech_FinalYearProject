@@ -21,6 +21,36 @@ class MatrixRow:
     claim_text: str = ""
 
 
+# Minimum NLI signal for an evidence item to be considered ON-TOPIC for the
+# original claim.  An item whose original-claim row is dominated by "neutral"
+# (i.e. max(entailment, contradiction) < this floor) does not bear on the
+# claim's truth — it is topically related noise (e.g. a fact-check of an
+# unrelated quote by the same entity).  Such items must be excluded from AWP
+# scoring on BOTH sides: kept in, they (a) crush the averaged original_support
+# and (b) hand the adversarial hypotheses a spurious high entailment, which is
+# what drove true claims to REFUTED.  See diagnosis 2026-05-30.
+RELEVANCE_MIN_SIGNAL: float = 0.15
+
+
+def relevant_evidence_texts(
+    rows: List["MatrixRow"],
+    min_signal: float = RELEVANCE_MIN_SIGNAL,
+) -> set:
+    """Return the set of evidence_texts that actually bear on the claim.
+
+    Relevance is judged from each evidence item's ORIGINAL-claim row
+    (is_adversarial=False): the item is on-topic only if it meaningfully
+    entails or contradicts the claim (max(entailment, contradiction) above
+    the floor).  Neutral-dominated items carry no signal and are dropped.
+    """
+    return {
+        getattr(r, "evidence_text", "")
+        for r in rows
+        if not r.is_adversarial
+        and max(r.entailment, r.contradiction) >= min_signal
+    }
+
+
 async def build_matrix(
     claim_text: str,
     evidence: List[EvidenceItem],

@@ -11,5 +11,14 @@
     "model_cache": false
   },
   "python.testing.pytestEnabled": true,
-  "python.testing.pytestArgs": ["tests"]
+  "python.testing.pytestArgs": [
+    "tests"
+  ],
+  "python-envs.pythonProjects": [
+    {
+      "path": "restart.py",
+      "envManager": "ms-python.python:venv",
+      "packageManager": "ms-python.python:pip"
+    }
+  ]
 }

@@ -209,6 +209,32 @@ def _strategy_temporal_alt(claim_text: str, claim_obj) -> List[AdversarialHypoth
     )]
 
 
+# Concrete entity substitutions for the entity_swap strategy (Fix #4, 2026-05-30).
+# NLI cross-encoders cannot score negation reliably — "someone other than Trump
+# is president" was entailed at 0.99 against Trump evidence, inflating
+# best_alt_support and pushing true claims to NOT_ENOUGH_INFO.  Swapping the
+# entity for a CONCRETE, plausible alternative of the same kind ("Joe Biden is
+# president") is scored correctly: real evidence will not entail the alternative,
+# so best_alt stays low for true claims.  Demo-grade lookup; unknown entities
+# fall back to a declarative meta-statement (not an in-place negation).
+_ENTITY_ALTERNATIVES = {
+    "donald trump": "Joe Biden",
+    "trump": "Joe Biden",
+    "joe biden": "Donald Trump",
+    "biden": "Donald Trump",
+    "barack obama": "George W. Bush",
+    "obama": "George W. Bush",
+    "narendra modi": "Rahul Gandhi",
+    "modi": "Rahul Gandhi",
+    "vladimir putin": "Dmitry Medvedev",
+    "putin": "Dmitry Medvedev",
+    "elon musk": "Jeff Bezos",
+    "benjamin netanyahu": "Yair Lapid",
+    "netanyahu": "Yair Lapid",
+    "xi jinping": "Hu Jintao",
+}
+
+
 def _is_valid_entity(ent: str) -> bool:
     """Return True only if ent looks like a meaningful named entity.
 
@@ -246,13 +272,14 @@ def _strategy_entity_swap(claim_text: str, claim_obj) -> List[AdversarialHypothe
         # Skip garbage tokens produced by NER on noisy OCR or scraped input.
         if not _is_valid_entity(ent):
             continue
-        # Generate a genuinely adversarial hypothesis by replacing the entity
-        # with "someone/something other than <entity>".  The old format
-        # f'"{ent}": ' + claim_text was semantically near-identical to the
-        # original claim, so NLI scored it with HIGH entailment → inflated
-        # best_alt_support → adv_score artificially low → all claims REFUTED.
-        if ent in claim_text:
-            hyp = claim_text.replace(ent, f"someone other than {ent}", 1)
+        # Fix #4 (2026-05-30): swap the entity for a CONCRETE alternative of the
+        # same kind rather than the negation "someone other than <entity>", which
+        # NLI cannot score reliably (see _ENTITY_ALTERNATIVES).  Known entities
+        # get a plausible same-type substitution; unknown entities fall back to a
+        # declarative meta-statement instead of an in-place negation.
+        alt = _ENTITY_ALTERNATIVES.get(ent.lower())
+        if alt and ent in claim_text:
+            hyp = claim_text.replace(ent, alt, 1)
         else:
             hyp = f"The attribution of this claim to {ent} is incorrect."
         hypotheses.append(AdversarialHypothesis(

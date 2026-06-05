@@ -38,12 +38,22 @@ def compute_awp_score(rows: List[MatrixRow]) -> dict:
     Returns
     -------
     dict with keys:
-        original_support  : mean entailment of original-claim rows
-        best_alt_support  : entailment of the strongest adversarial row
-        adversarial_score : original / (original + best_alt)  in [0, 1]
-        avg_contradiction : mean contradiction of original rows
-        best_alt_text     : hypothesis text of the best adversarial row
+        original_support       : mean entailment of relevant original-claim rows
+        best_alt_support       : entailment of the strongest relevant adversarial row
+        adversarial_score      : original / (original + best_alt)  in [0, 1]
+        avg_contradiction      : mean contradiction of relevant original rows
+        best_alt_text          : hypothesis text of the best adversarial row
+        relevant_support_count : number of on-topic evidence items found
+
+    Off-topic evidence (neutral-dominated w.r.t. the claim) is excluded from
+    BOTH the original and adversarial sides before scoring — see
+    entailment_matrix.relevant_evidence_texts.  When NO evidence is on-topic,
+    adversarial_score is returned as 0.5 (NOT_ENOUGH_INFO territory) and
+    relevant_support_count is 0 so the caller can distinguish "no relevant
+    evidence" from genuine refutation.
     """
+    from hallucination_guard.text.entailment_matrix import relevant_evidence_texts
+
     original = [r for r in rows if not r.is_adversarial]
     adversarial = [r for r in rows if r.is_adversarial]
 
@@ -54,15 +64,32 @@ def compute_awp_score(rows: List[MatrixRow]) -> dict:
             "adversarial_score": 0.5,
             "avg_contradiction": 0.0,
             "best_alt_text": "",
+            "relevant_support_count": 0,
         }
 
-    orig_support = sum(r.entailment for r in original) / len(original)
-    avg_contradiction = sum(r.contradiction for r in original) / len(original)
+    # Relevance gate: keep only evidence that actually bears on the claim.
+    relevant = relevant_evidence_texts(rows)
+    rel_original = [r for r in original if getattr(r, "evidence_text", "") in relevant]
+    rel_adversarial = [r for r in adversarial if getattr(r, "evidence_text", "") in relevant]
+
+    if not rel_original:
+        # No evidence addresses the claim — cannot support or refute.
+        return {
+            "original_support": 0.0,
+            "best_alt_support": 0.0,
+            "adversarial_score": 0.5,
+            "avg_contradiction": 0.0,
+            "best_alt_text": "",
+            "relevant_support_count": 0,
+        }
+
+    orig_support = sum(r.entailment for r in rel_original) / len(rel_original)
+    avg_contradiction = sum(r.contradiction for r in rel_original) / len(rel_original)
 
     best_alt_support: float = 0.0
     best_alt_text: str = ""
-    if adversarial:
-        best_row = max(adversarial, key=lambda r: r.entailment)
+    if rel_adversarial:
+        best_row = max(rel_adversarial, key=lambda r: r.entailment)
         best_alt_support = best_row.entailment
         best_alt_text = best_row.hypothesis
 
@@ -75,6 +102,7 @@ def compute_awp_score(rows: List[MatrixRow]) -> dict:
         "adversarial_score": adv_score,
         "avg_contradiction": avg_contradiction,
         "best_alt_text": best_alt_text,
+        "relevant_support_count": len(rel_original),
     }
 
 

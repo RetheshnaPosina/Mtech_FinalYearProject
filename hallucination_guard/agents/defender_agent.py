@@ -12,7 +12,7 @@ from hallucination_guard.agents.base_agent import BaseAgent
 from hallucination_guard.trust_score import AgentMessage, Verdict
 from hallucination_guard.text.evidence_pool import EvidencePool
 from hallucination_guard.text.evidence_retriever import retrieve_evidence
-from hallucination_guard.text.entailment_matrix import build_matrix
+from hallucination_guard.text.entailment_matrix import build_matrix, relevant_evidence_texts
 from hallucination_guard.config import settings
 
 
@@ -66,7 +66,15 @@ class DefenderAgent(BaseAgent):
             supporting_evidence = pool_evidence  # fallback: use all if pool not tagged
         matrix = await build_matrix(claim, supporting_evidence, [])
 
-        original_rows = [r for r in matrix if not r.is_adversarial]
+        # Score only over evidence that is on-topic for the claim.  Off-topic
+        # evidence (neutral-dominated — e.g. fact-checks of unrelated quotes by
+        # the same entity) otherwise drags avg_entailment toward 0 and buries
+        # genuine support, mislabelling true claims as NOT_ENOUGH_INFO.
+        relevant = relevant_evidence_texts(matrix)
+        original_rows = [
+            r for r in matrix
+            if not r.is_adversarial and r.evidence_text in relevant
+        ]
         avg_ent = (
             sum(r.entailment for r in original_rows) / len(original_rows)
             if original_rows else 0.0

@@ -378,8 +378,15 @@ async def retrieve_evidence(query: str, top_k: int = 3) -> List[EvidenceItem]:
         except Exception as e:
             logger.debug("Google search failed: %s", e)
 
-    # 4. Wikipedia (background context, no key needed)
-    if len(items) < top_k:
+    # 4. Wikipedia (background context, no key needed).
+    # Fix #3 (2026-05-30): consult Wikipedia whenever we lack encyclopedic
+    # coverage — even if fact-check results already fill top_k.  Identity/role
+    # facts ("X is the 47th president") come from encyclopedic sources, not from
+    # quote-level fact-checks; without this, a query that returns only
+    # fact-checks of an entity's statements never gets the biographical evidence
+    # that actually addresses the claim.
+    _has_nonfactcheck = any(not it.source.startswith("factcheck:") for it in items)
+    if len(items) < top_k or not _has_nonfactcheck:
         try:
             wiki_items = await _wikipedia_search_async(query, max_results=top_k)
             items.extend(wiki_items)
@@ -394,13 +401,35 @@ async def retrieve_evidence(query: str, top_k: int = 3) -> List[EvidenceItem]:
     if not items:
         items = _mock_lookup(query)
 
-    # Deduplicate by text, filter low-relevance items, sort by relevance descending
+    # Deduplicate by text, filter low-relevance items, sort by relevance descending.
+    # Fix #3 (2026-05-30): cap quote-level fact-checks to half of top_k so they
+    # cannot monopolise the result set and crowd out encyclopedic / web evidence
+    # that actually addresses identity and role claims.  Deferred fact-checks
+    # backfill only if slots remain.
     _RELEVANCE_THRESHOLD = 0.5
+    _FACTCHECK_CAP = max(1, top_k // 2)
+
     seen: set = set()
     unique: List[EvidenceItem] = []
+    deferred_factchecks: List[EvidenceItem] = []
+    factcheck_used = 0
     for ev in sorted(items, key=lambda e: e.relevance, reverse=True):
         if ev.relevance < _RELEVANCE_THRESHOLD:
             continue
+        if ev.text in seen:
+            continue
+        if ev.source.startswith("factcheck:") and factcheck_used >= _FACTCHECK_CAP:
+            deferred_factchecks.append(ev)
+            continue
+        seen.add(ev.text)
+        unique.append(ev)
+        if ev.source.startswith("factcheck:"):
+            factcheck_used += 1
+
+    # Backfill with deferred fact-checks only if room remains under top_k.
+    for ev in deferred_factchecks:
+        if len(unique) >= top_k:
+            break
         if ev.text not in seen:
             seen.add(ev.text)
             unique.append(ev)
